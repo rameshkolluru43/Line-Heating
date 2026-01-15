@@ -1,0 +1,102 @@
+% Inherent strain and modeling approaches for line heating
+\documentclass[11pt]{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{geometry}
+\geometry{margin=1in}
+\title{Line Heating Modeling Approaches and Inherent Strain Formulation}
+\author{Compiled for Ship Plate Bending Prototype}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Model Classes in Line Heating}
+\begin{enumerate}
+  \item \textbf{Thermo-elasto-plastic FEM (ground truth)}:\ Resolves transient heat conduction and nonlinear mechanics with temperature-dependent properties. Governing equations:
+    \begin{align}
+      \rho c_p \frac{\partial T}{\partial t} &= \nabla \cdot (k \nabla T) + Q(x,y,t) - (Q_{\text{conv}} + Q_{\text{rad}}), \\
+      \nabla \cdot \boldsymbol\sigma &= \mathbf{0}, \quad \boldsymbol\varepsilon = \boldsymbol\varepsilon^e + \boldsymbol\varepsilon^p + \boldsymbol\varepsilon^T, \quad \boldsymbol\varepsilon^T = \alpha (T-T_0)\mathbf{I},
+    \end{align}
+    with von Mises yield and incremental flow rules. Solved via 3D FEM for validation and database generation.
+  \item \textbf{Inherent strain / reduced plate models}:\ Replace plastic strain by inherent strain fields driving plate bending (Clausen, IHI-ALPHA). Suitable for planning and inverse problems.
+  \item \textbf{Empirical regression fits}:\ Dimensionless groups and polynomial/spline fits for curvature/shrinkage; fast interpolation, limited extrapolation.
+  \item \textbf{Data-driven AI surrogates}:\ MLPs or hybrid FEM--ANN models trained on FEM/experimental data for real-time prediction and control. AR-guided systems consume FEM/ANN databases for human-in-the-loop guidance.
+\end{enumerate}
+
+\section{Inherent Strain Formulation (Clausen / IHI-ALPHA style)}
+\subsection{Kinematics}
+Mid-surface membrane strains and curvatures:
+\begin{align}
+  \boldsymbol\varepsilon^0 &= \{\varepsilon_x^0,\ \varepsilon_y^0,\ \gamma_{xy}^0\}^\top, \\
+  \boldsymbol\kappa &= \{\kappa_x,\ \kappa_y,\ \kappa_{xy}\}^\top.
+\end{align}
+Displacement relations (Kirchhoff--Love, small rotations):
+\begin{align}
+  \varepsilon_x^0 &= \partial u / \partial x, \quad \varepsilon_y^0 = \partial v / \partial y, \quad \gamma_{xy}^0 = \partial u / \partial y + \partial v / \partial x, \\
+  \kappa_x &= -\partial^2 w / \partial x^2, \quad \kappa_y = -\partial^2 w / \partial y^2, \quad \kappa_{xy} = -2\,\partial^2 w / (\partial x\,\partial y).
+\end{align}
+
+\subsection{Inherent Strain Decomposition}
+Total strain is split into elastic and inherent parts:
+\begin{align}
+  \boldsymbol\varepsilon &= \boldsymbol\varepsilon^e + \boldsymbol\varepsilon^{\text{inh}},
+\end{align}
+with membrane and bending components:
+\begin{align}
+  \boldsymbol\varepsilon^{\text{inh},0} &= \{\varepsilon_x^{\text{inh}},\ \varepsilon_y^{\text{inh}},\ \gamma_{xy}^{\text{inh}}\}^\top, \\
+  \boldsymbol\kappa^{\text{inh}} &= \{\kappa_x^{\text{inh}},\ \kappa_y^{\text{inh}},\ \kappa_{xy}^{\text{inh}}\}^\top.
+\end{align}
+Reduced per-line parameterization (tangent \(\hat t\), normal \(\hat n\)) uses four scalars: longitudinal/transverse shrinkage \((\varepsilon_L^{\text{inh}}, \varepsilon_T^{\text{inh}})\) and bending \((\kappa_L^{\text{inh}}, \kappa_T^{\text{inh}})\). Rotating into the global \((x,y)\) frame:
+\begin{align}
+  \varepsilon_x^{\text{inh}} &= \varepsilon_L^{\text{inh}} t_x^2 + \varepsilon_T^{\text{inh}} n_x^2, \\
+  \varepsilon_y^{\text{inh}} &= \varepsilon_L^{\text{inh}} t_y^2 + \varepsilon_T^{\text{inh}} n_y^2, \\
+  \gamma_{xy}^{\text{inh}} &= 2(\varepsilon_L^{\text{inh}} - \varepsilon_T^{\text{inh}}) t_x t_y,
+\end{align}
+with analogous relations for \(\boldsymbol\kappa^{\text{inh}}\). Spatially, these fields are distributed over a band (top-hat or Gaussian) of half-width \(w/2\).
+
+\subsection{Constitutive Relations (Plane Stress Plate)}
+\begin{align}
+  \mathbf{N} &= \mathbf{A}\,(\boldsymbol\varepsilon^0 - \boldsymbol\varepsilon^{\text{inh},0}), \\
+  \mathbf{M} &= \mathbf{D}\,(\boldsymbol\kappa - \boldsymbol\kappa^{\text{inh}}),
+\end{align}
+where
+\begin{align}
+  \mathbf{A} &= \frac{Et}{1-\nu^2}
+  \begin{bmatrix}
+    1 & \nu & 0 \\
+    \nu & 1 & 0 \\
+    0 & 0 & \tfrac{1-\nu}{2}
+  \end{bmatrix}, \qquad
+  \mathbf{D} = \frac{Et^3}{12(1-\nu^2)}
+  \begin{bmatrix}
+    1 & \nu & 0 \\
+    \nu & 1 & 0 \\
+    0 & 0 & \tfrac{1-\nu}{2}
+  \end{bmatrix}.
+\end{align}
+
+\subsection{Equilibrium}
+No external mechanical loads:
+\begin{align}
+  \nabla \cdot \mathbf{N} &= \mathbf{0}, \\
+  \nabla \cdot \nabla \cdot \mathbf{M} &= 0.
+\end{align}
+In reduced bending form (for isotropic plates):
+\begin{align}
+  D \nabla^4 w = M^{\text{inh}} \approx D\,\kappa^{\text{inh}},
+\end{align}
+with boundary conditions per support (simply supported, clamped, free).
+
+\subsection{Calibration Workflow}
+\begin{enumerate}
+  \item Run thermo-elasto-plastic FEM or conduct experiments to obtain plastic strain fields.
+  \item Integrate through thickness to extract \(\varepsilon_L^{\text{inh}}, \varepsilon_T^{\text{inh}}, \kappa_L^{\text{inh}}, \kappa_T^{\text{inh}}\) per line segment.
+  \item Fit transverse attenuation (Gaussian/top-hat) and any along-line cooling decay.
+  \item Feed inherent fields into reduced plate solver (Kirchhoff--Love or Mindlin) for planning/inverse tasks.
+\end{enumerate}
+
+\section{Notes on Heat/Input Scaling}
+Inherent strains reflect total heat input per line: power, travel speed, footprint width, and repeat count. Mapping heat to \(\varepsilon^{\text{inh}}, \kappa^{\text{inh}}\) is calibrated from FEM/experiment and should avoid ad-hoc multipliers; scaling enters via the calibrated energy-to-strain law.
+
+\end{document}

@@ -1,0 +1,91 @@
+# Dockerignore file - excludes files from Docker build context
+# This speeds up Docker builds and reduces image size
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Virtual environments
+.venv*/
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Build artifacts (will be rebuilt in container)
+build/
+dist/
+thermo_fem/build/
+thermo_fem/cpp/build/
+*.o
+*.so
+*.egg-info/
+
+# Results and outputs (mount as volume instead)
+results/
+*.vtk
+*.vtu
+*.msh
+*.npy
+*.npz
+
+# Reports (generated on demand)
+*.pdf
+*.aux
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Documentation (not needed in container)
+docs/
+LiteratureDocs/
+*.md
+!README.md
+
+# User configs (mount separately)
+run_config.json
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Large data files (if any)
+*.dat
+*.h5
+*.hdf5
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb

@@ -1,0 +1,23 @@
+# Python dependencies (installed into the local venv by scripts/run_anywhere.py)
+numpy>=1.26
+scipy>=1.11
+matplotlib>=3.8
+
+# Mesh generation
+# - This installs the Python Gmsh bindings (which are used by the solver).
+# - A system 'gmsh' executable is optional; if missing the runner will print install hints.
+gmsh>=4.11
+
+# C++/build integration
+# - pybind11 provides headers + a CMake package used to build the extension module.
+# - cmake is used to build the C++ extension (the runner can use either system cmake or this package).
+pybind11>=2.11
+cmake>=3.26
+
+# System dependencies (NOT installable via pip; listed here for completeness)
+# - C++17 compiler toolchain
+#   - macOS: Xcode Command Line Tools
+#   - Linux: gcc/g++ (or clang)
+#   - Windows: Visual Studio Build Tools
+# - (Optional, faster builds) Ninja
+# - (Optional, for report.pdf) latexmk or pdflatex (TeX Live / MiKTeX)

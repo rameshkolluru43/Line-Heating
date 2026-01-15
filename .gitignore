@@ -1,0 +1,97 @@
+# Python
+__pycache__/
+*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv*/
+venv/
+env/
+ENV/
+
+# Generated results / outputs
+results/*/
+!results/.gitkeep
+thermo_fem/python/outputs*/
+thermo_fem/python/sweep_*/
+thermo_fem/outputs/
+python_prototype/examples/outputs_*/
+*.vtk
+*.vtu
+*.msh
+*.npy
+*.npz
+
+# CMake / build artifacts
+thermo_fem/build/
+thermo_fem/cpp/build/
+build/
+dist/
+*.egg-info/
+*.egg
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.dylib
+*.exe
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+
+# LaTeX build artifacts
+*.pdf
+*.aux
+*.fls
+*.fdb_latexmk
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.bbl
+*.blg
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# User configuration files
+run_config.json
+!run_config.example.json
+
+# Temporary files
+*.tmp
+*.temp
+tmp/
+temp/
+
+# OS specific
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Testing
+.pytest_cache/
+.tox/
+
+# Logs
+run.log

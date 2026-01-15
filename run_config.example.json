@@ -1,0 +1,45 @@
+{
+  "out": "results/run_from_json",
+  "runner": {
+    "report_only": false,
+    "no_build": false,
+    "no_report": false
+  },
+  "simulation": {
+    "Lx": 1000,
+    "Ly": 1000,
+    "thickness": 12,
+
+    "h": 40,
+    "h_refine": 10,
+    "refine_band": 160,
+
+    "heat_y_list": [250, 500, 750],
+    "heat_mode": "sequential",
+    "pass_gap": 0,
+
+    "target_Tmax": 900,
+    "target_Tmax_tol": 20,
+    "target_Tmax_iters": 3,
+
+    "dt": 5,
+    "extra_time": 400,
+
+    "r0": 25,
+    "velocity": 10,
+
+    "h_conv": 5e-5,
+    "quench": true,
+    "quench_h_conv": 5e-3,
+    "quench_T_inf": 293,
+
+    "bc": "corner_pins",
+
+    "use_inherent": true,
+    "eps0": 0.002,
+    "inh_sigma": 60,
+    "inh_zfrac": 0.5,
+
+    "vtk_deform_scale": 1
+  }
+}
