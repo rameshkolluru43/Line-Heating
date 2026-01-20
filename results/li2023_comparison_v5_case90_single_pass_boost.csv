@@ -1,0 +1,2 @@
+case_id,velocity_mm_s,energy_J_mm,thickness_mm,passes,w_exp_mm,w_pred_mm,error_mm,eps0,T_peak_K,eps0_model
+90,15.0,1000.0,10.0,1,11.322,11.302593658968538,-0.019406341031460883,0.09764494272658723,1376.4543284958845,"C=0.06,a=0.35,b=0.0,p=0.325,delta=0.02,k_energy=0.43,k_single=0.33"

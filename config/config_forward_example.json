@@ -1,0 +1,60 @@
+{
+  "_comment": "Forward Problem: Validate curvature from 900K torch temperature",
+  "_use_case": "Given a line heating process at 900K, predict the resulting curvature profile",
+  
+  "out": "results/forward_900K_validation",
+  
+  "runner": {
+    "report_only": false,
+    "no_build": false,
+    "no_report": false
+  },
+  
+  "simulation": {
+    "_plate_dimensions": "Plate size and thickness",
+    "Lx": 1000,
+    "Ly": 1000,
+    "thickness": 12,
+
+    "_mesh_parameters": "Element sizes and refinement",
+    "h": 40,
+    "h_refine": 10,
+    "refine_band": 160,
+
+    "_heating_configuration": "Line positions (y-coordinates in mm)",
+    "heat_y_list": [500],
+    "heat_mode": "sequential",
+    "pass_gap": 0,
+
+    "_temperature_control": "Target torch temperature",
+    "target_Tmax": 900,
+    "target_Tmax_tol": 20,
+    "target_Tmax_iters": 3,
+
+    "_time_stepping": "Simulation time parameters",
+    "dt": 5,
+    "extra_time": 400,
+
+    "_torch_parameters": "Heat source characteristics",
+    "r0": 25,
+    "velocity": 10,
+
+    "_cooling": "Convection and quenching",
+    "h_conv": 5e-5,
+    "quench": true,
+    "quench_h_conv": 5e-3,
+    "quench_T_inf": 293,
+
+    "_boundary_conditions": "Mechanical constraints",
+    "bc": "corner_pins",
+
+    "_inherent_strain": "For permanent deformation",
+    "use_inherent": true,
+    "eps0": 0.002,
+    "inh_sigma": 60,
+    "inh_zfrac": 0.5,
+
+    "_visualization": "VTK output scaling",
+    "vtk_deform_scale": 1
+  }
+}

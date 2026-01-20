@@ -38,6 +38,134 @@ except Exception as exc:  # pragma: no cover
     ) from exc
 
 
+def _coerce_line_item(item: object) -> dict[str, float]:
+    if isinstance(item, dict):
+        if all(k in item for k in ("x0", "y0", "x1", "y1")):
+            return {
+                "x0": float(item["x0"]),
+                "y0": float(item["y0"]),
+                "x1": float(item["x1"]),
+                "y1": float(item["y1"]),
+            }
+        if all(k in item for k in ("x_start_mm", "x_end_mm", "y_mm")):
+            y = float(item["y_mm"])
+            return {
+                "x0": float(item["x_start_mm"]),
+                "y0": y,
+                "x1": float(item["x_end_mm"]),
+                "y1": y,
+            }
+    if isinstance(item, (list, tuple)) and len(item) == 4:
+        return {"x0": float(item[0]), "y0": float(item[1]), "x1": float(item[2]), "y1": float(item[3])}
+    raise ValueError(f"Invalid heat line item: {item}")
+
+
+def _load_heat_lines_arg(heat_lines: str | None, heat_lines_file: str | None) -> list[dict[str, float]] | None:
+    payload = None
+    if heat_lines_file is not None:
+        payload = Path(heat_lines_file).read_text(encoding="utf-8")
+    elif heat_lines is not None:
+        if str(heat_lines).startswith("@"):  # @file.json
+            payload = Path(str(heat_lines)[1:]).read_text(encoding="utf-8")
+        else:
+            path = Path(str(heat_lines))
+            if path.exists():
+                payload = path.read_text(encoding="utf-8")
+            else:
+                payload = str(heat_lines)
+    if payload is None:
+        return None
+    data = json.loads(payload)
+    if isinstance(data, dict) and "lines" in data:
+        data = data["lines"]
+    if not isinstance(data, list):
+        raise ValueError("heat_lines must be a JSON list")
+    return [_coerce_line_item(item) for item in data]
+
+
+def _build_heat_lines_from_ys(Lx: float, heat_ys: list[float]) -> list[dict[str, float]]:
+    return [
+        {"x0": 0.0, "y0": float(y), "x1": float(Lx), "y1": float(y)}
+        for y in heat_ys
+    ]
+
+
+def _prepare_heat_lines(heat_lines: list[dict[str, float]]) -> list[dict[str, float]]:
+    prepared = []
+    for ln in heat_lines:
+        x0 = float(ln["x0"])
+        y0 = float(ln["y0"])
+        x1 = float(ln["x1"])
+        y1 = float(ln["y1"])
+        dx = x1 - x0
+        dy = y1 - y0
+        length = float(np.hypot(dx, dy))
+        if length <= 0.0:
+            raise ValueError("Heat line length must be positive")
+        prepared.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "ux": dx / length, "uy": dy / length, "length": length})
+    return prepared
+
+
+def _active_heat_positions_at_time(
+    *,
+    t: float,
+    velocity: float,
+    heat_lines: list[dict[str, float]],
+    heat_mode: str,
+    pass_gap: float,
+) -> list[tuple[float, float]]:
+    """Return active source (x,y) positions at time t along each heat line."""
+    heat_mode = str(heat_mode).strip().lower()
+    if not heat_lines or velocity <= 0.0:
+        return []
+
+    if heat_mode == "simultaneous":
+        positions: list[tuple[float, float]] = []
+        s = float(velocity) * float(t)
+        for ln in heat_lines:
+            if 0.0 <= s <= float(ln["length"]):
+                x = float(ln["x0"]) + float(ln["ux"]) * s
+                y = float(ln["y0"]) + float(ln["uy"]) * s
+                positions.append((x, y))
+        return positions
+
+    if heat_mode == "sequential":
+        local_t = float(t)
+        gap = float(max(0.0, pass_gap))
+        for ln in heat_lines:
+            duration = float(ln["length"]) / float(velocity)
+            if local_t < duration:
+                s = float(velocity) * local_t
+                x = float(ln["x0"]) + float(ln["ux"]) * s
+                y = float(ln["y0"]) + float(ln["uy"]) * s
+                return [(x, y)]
+            if local_t < duration + gap:
+                return []
+            local_t -= duration + gap
+        return []
+
+    raise ValueError(f"Unknown heat_mode: {heat_mode} (expected 'simultaneous' or 'sequential')")
+
+
+def _distance_to_segment(xy: np.ndarray, line: dict[str, float]) -> np.ndarray:
+    p0 = np.array([line["x0"], line["y0"]], dtype=float)
+    p1 = np.array([line["x1"], line["y1"]], dtype=float)
+    v = p1 - p0
+    denom = float(np.dot(v, v))
+    if denom <= 0.0:
+        return np.linalg.norm(xy - p0[None, :], axis=1)
+    t = ((xy - p0[None, :]) @ v) / denom
+    t = np.clip(t, 0.0, 1.0)
+    proj = p0[None, :] + t[:, None] * v[None, :]
+    return np.linalg.norm(xy - proj, axis=1)
+
+
+def _along_line_coordinate(xy: np.ndarray, line: dict[str, float]) -> np.ndarray:
+    p0 = np.array([line["x0"], line["y0"]], dtype=float)
+    v = np.array([line["ux"], line["uy"]], dtype=float)
+    return (xy - p0[None, :]) @ v
+
+
 def write_vtk_unstructured_grid(
     file_path: Path,
     nodes: np.ndarray,
@@ -98,6 +226,7 @@ def build_plate_mesh_3d(
     h_refine: float | None,
     refine_band: float,
     heat_ys: list[float] | None,
+    heat_lines: list[dict[str, float]] | None,
     out_dir: Path,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Create 3D plate mesh (tet4) with a refinement band around the heating line."""
@@ -117,14 +246,19 @@ def build_plate_mesh_3d(
         gmsh.model.occ.addBox(0.0, 0.0, 0.0, float(Lx), float(Ly), float(thickness))
 
         # Create OCC curve(s) along the heating line(s) on the top face.
-        if not heat_ys:
-            heat_ys = [float(Ly / 2.0)]
-
         heating_curves: list[int] = []
-        for y in heat_ys:
-            p1 = gmsh.model.occ.addPoint(0.0, float(y), float(thickness), float(h_refine))
-            p2 = gmsh.model.occ.addPoint(float(Lx), float(y), float(thickness), float(h_refine))
-            heating_curves.append(int(gmsh.model.occ.addLine(p1, p2)))
+        if heat_lines:
+            for ln in heat_lines:
+                p1 = gmsh.model.occ.addPoint(float(ln["x0"]), float(ln["y0"]), float(thickness), float(h_refine))
+                p2 = gmsh.model.occ.addPoint(float(ln["x1"]), float(ln["y1"]), float(thickness), float(h_refine))
+                heating_curves.append(int(gmsh.model.occ.addLine(p1, p2)))
+        else:
+            if not heat_ys:
+                heat_ys = [float(Ly / 2.0)]
+            for y in heat_ys:
+                p1 = gmsh.model.occ.addPoint(0.0, float(y), float(thickness), float(h_refine))
+                p2 = gmsh.model.occ.addPoint(float(Lx), float(y), float(thickness), float(h_refine))
+                heating_curves.append(int(gmsh.model.occ.addLine(p1, p2)))
 
         gmsh.model.occ.synchronize()
 
@@ -379,6 +513,7 @@ def assemble_gaussian_flux_on_triangles(
     y_pos: float,
     q0: float,
     r0: float,
+    beta: float = 2.0,
 ) -> np.ndarray:
     """Surface Gaussian heat flux integrated over surface triangles (distributed to nodes)."""
     n = int(nodes.shape[0])
@@ -387,6 +522,7 @@ def assemble_gaussian_flux_on_triangles(
         return rhs
 
     r0_sq = float(r0 * r0)
+    beta = float(beta)
     for t in tri:
         i0, i1, i2 = (int(t[0]), int(t[1]), int(t[2]))
         a, b, c = nodes[i0], nodes[i1], nodes[i2]
@@ -397,7 +533,7 @@ def assemble_gaussian_flux_on_triangles(
         centroid = (a + b + c) / 3.0
         dx = float(centroid[0] - x_pos)
         dy = float(centroid[1] - y_pos)
-        q = float(q0 * np.exp(-2.0 * (dx * dx + dy * dy) / r0_sq))
+        q = float(q0 * np.exp(-beta * (dx * dx + dy * dy) / r0_sq))
         if q < q0 * 1e-9:
             continue
 
@@ -412,52 +548,45 @@ def assemble_gaussian_flux_on_triangles(
 def _active_heat_sources_at_time(
     *,
     t: float,
-    Lx: float,
     velocity: float,
-    heat_ys: list[float],
+    heat_lines: list[dict[str, float]],
     heat_mode: str,
     pass_gap: float,
-) -> tuple[float | None, list[float]]:
-    """Return active source x position and list of active y-lines at time t.
+) -> list[tuple[float, float]]:
+    """Backward-compatible wrapper returning active (x,y) positions."""
+    return _active_heat_positions_at_time(
+        t=t,
+        velocity=velocity,
+        heat_lines=heat_lines,
+        heat_mode=heat_mode,
+        pass_gap=pass_gap,
+    )
 
-    Modes:
-    - simultaneous: all y lines are active together, scanning once.
-    - sequential: one y line is active per pass, scanning from x=0..Lx each pass.
-    """
-    heat_mode = str(heat_mode).strip().lower()
-    if not heat_ys:
-        return None, []
 
-    if velocity <= 0.0:
-        return None, []
+def _parse_temp_table(table_str: str | None) -> tuple[np.ndarray, np.ndarray] | None:
+    if table_str is None:
+        return None
+    items = []
+    for token in str(table_str).split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if ":" not in token:
+            raise ValueError(f"Invalid table token '{token}'. Expected 'T:value'.")
+        t_s, v_s = token.split(":", 1)
+        items.append((float(t_s), float(v_s)))
+    if not items:
+        return None
+    items.sort(key=lambda tv: tv[0])
+    temps_c = np.array([t for t, _ in items], dtype=float)
+    values = np.array([v for _, v in items], dtype=float)
+    return temps_c, values
 
-    if heat_mode == "simultaneous":
-        x_pos = float(velocity) * float(t)
-        if 0.0 <= x_pos <= float(Lx):
-            return x_pos, list(heat_ys)
-        return None, []
 
-    if heat_mode == "sequential":
-        scan_time = float(Lx) / float(velocity)
-        cycle = scan_time + float(max(0.0, pass_gap))
-        if cycle <= 0.0:
-            return None, []
-
-        pass_idx = int(np.floor(float(t) / cycle))
-        if pass_idx < 0 or pass_idx >= len(heat_ys):
-            return None, []
-
-        local_t = float(t) - float(pass_idx) * cycle
-        if local_t < 0.0 or local_t > scan_time:
-            # In the gap between passes.
-            return None, []
-
-        x_pos = float(velocity) * local_t
-        if 0.0 <= x_pos <= float(Lx):
-            return x_pos, [float(heat_ys[pass_idx])]
-        return None, []
-
-    raise ValueError(f"Unknown heat_mode: {heat_mode} (expected 'simultaneous' or 'sequential')")
+def _interp_table(temps_k: np.ndarray, table: tuple[np.ndarray, np.ndarray]) -> np.ndarray:
+    temps_c = temps_k - 273.15
+    t_tab, v_tab = table
+    return np.interp(temps_c, t_tab, v_tab, left=v_tab[0], right=v_tab[-1])
 
 
 def solve_thermal_3d(
@@ -468,6 +597,7 @@ def solve_thermal_3d(
     Lx: float,
     Ly: float,
     heat_ys: list[float],
+    heat_lines: list[dict[str, float]] | None,
     dt: float,
     steps: int,
     conductivity: float,
@@ -476,7 +606,8 @@ def solve_thermal_3d(
     q0: float,
     r0: float,
     velocity: float,
-    h_conv: float,
+    h_conv_top: float,
+    h_conv_bottom: float,
     ambient_temperature: float,
     reference_temperature: float,
     k_slope: float = 0.0,
@@ -485,31 +616,41 @@ def solve_thermal_3d(
     sigma_sb: float = 5.670374419e-14,
     picard_iters: int = 1,
     quench_start: float | None = None,
-    quench_h_conv: float | None = None,
+    quench_h_conv_top: float | None = None,
+    quench_h_conv_bottom: float | None = None,
     quench_ambient_temperature: float | None = None,
     heat_mode: str = "simultaneous",
     pass_gap: float = 0.0,
+    gaussian_beta: float = 2.0,
 ) -> np.ndarray:
     temperature = np.full(nodes.shape[0], float(reference_temperature), dtype=float)
-    heat_ys = [float(y) for y in heat_ys]
+    if heat_lines is None:
+        heat_lines = _build_heat_lines_from_ys(float(Lx), [float(y) for y in heat_ys])
+    heat_lines = _prepare_heat_lines(list(heat_lines))
 
     for step in range(int(steps)):
         t = step * dt
-        x_pos, active_ys = _active_heat_sources_at_time(
+        active_positions = _active_heat_sources_at_time(
             t=float(t),
-            Lx=float(Lx),
             velocity=float(velocity),
-            heat_ys=heat_ys,
+            heat_lines=heat_lines,
             heat_mode=str(heat_mode),
             pass_gap=float(pass_gap),
         )
 
         # Optional uniform quench phase (stronger convection / different ambient)
-        h_conv_step = float(h_conv)
+        h_conv_top_step = float(h_conv_top)
+        h_conv_bottom_step = float(h_conv_bottom)
         ambient_step = float(ambient_temperature)
-        if quench_start is not None and quench_h_conv is not None and quench_ambient_temperature is not None:
+        if (
+            quench_start is not None
+            and quench_h_conv_top is not None
+            and quench_h_conv_bottom is not None
+            and quench_ambient_temperature is not None
+        ):
             if float(t) >= float(quench_start):
-                h_conv_step = float(quench_h_conv)
+                h_conv_top_step = float(quench_h_conv_top)
+                h_conv_bottom_step = float(quench_h_conv_bottom)
                 ambient_step = float(quench_ambient_temperature)
 
         # Picard iterations for temp-dependent K/M and linearized radiation
@@ -530,8 +671,8 @@ def solve_thermal_3d(
             else:
                 K, M = assemble_heat_3d(nodes, tet, conductivity, density, heat_capacity)
 
-            Kb_top, rhs_top = assemble_convection_on_triangles(nodes, top_tri, h_conv_step, ambient_step)
-            Kb_bot, rhs_bot = assemble_convection_on_triangles(nodes, bottom_tri, h_conv_step, ambient_step)
+            Kb_top, rhs_top = assemble_convection_on_triangles(nodes, top_tri, h_conv_top_step, ambient_step)
+            Kb_bot, rhs_bot = assemble_convection_on_triangles(nodes, bottom_tri, h_conv_bottom_step, ambient_step)
             Kb = Kb_top + Kb_bot
             rhs_b = rhs_top + rhs_bot
 
@@ -550,15 +691,17 @@ def solve_thermal_3d(
             solver = spla.factorized(A.tocsc())
 
             rhs = (M / dt) * temperature + rhs_b
-            if x_pos is not None and active_ys:
-                for y in active_ys:
-                    rhs += assemble_gaussian_flux_on_triangles(nodes, top_tri, float(x_pos), float(y), q0, r0)
+            if active_positions:
+                for x_pos, y_pos in active_positions:
+                    rhs += assemble_gaussian_flux_on_triangles(
+                        nodes, top_tri, float(x_pos), float(y_pos), q0, r0, gaussian_beta
+                    )
             T_iter = solver(rhs)
 
         temperature = np.asarray(T_iter, dtype=float)
 
         if step % max(1, steps // 10) == 0:
-            x_disp = -1.0 if x_pos is None else float(x_pos)
+            x_disp = -1.0 if not active_positions else float(active_positions[0][0])
             print(
                 f"  Thermal step {step:5d}/{steps}, t={t:.2f}s, x={x_disp:.1f}mm, T_max={float(np.max(temperature)):.2f}K"
             )
@@ -574,6 +717,7 @@ def solve_thermal_3d_with_peak(
     Lx: float,
     Ly: float,
     heat_ys: list[float],
+    heat_lines: list[dict[str, float]] | None,
     dt: float,
     steps: int,
     conductivity: float,
@@ -582,7 +726,8 @@ def solve_thermal_3d_with_peak(
     q0: float,
     r0: float,
     velocity: float,
-    h_conv: float,
+    h_conv_top: float,
+    h_conv_bottom: float,
     ambient_temperature: float,
     reference_temperature: float,
     k_slope: float = 0.0,
@@ -591,11 +736,18 @@ def solve_thermal_3d_with_peak(
     sigma_sb: float = 5.670374419e-14,
     picard_iters: int = 1,
     quench_start: float | None = None,
-    quench_h_conv: float | None = None,
+    quench_h_conv_top: float | None = None,
+    quench_h_conv_bottom: float | None = None,
     quench_ambient_temperature: float | None = None,
     heat_mode: str = "simultaneous",
     pass_gap: float = 0.0,
-) -> tuple[np.ndarray, dict[str, float]]:
+    gaussian_beta: float = 2.0,
+    adaptive_dt: bool = False,
+    total_time: float | None = None,
+    dt_min: float | None = None,
+    dt_max: float | None = None,
+    return_history: bool = False,
+) -> tuple[np.ndarray, dict[str, float]] | tuple[np.ndarray, dict[str, float], list[np.ndarray], list[float]]:
     """Solve thermal problem and also track global peak temperature over time.
 
     Returns:
@@ -609,30 +761,69 @@ def solve_thermal_3d_with_peak(
       - x_at_T_max_global, y_at_T_max_global, z_at_T_max_global (mm)
     """
     temperature = np.full(nodes.shape[0], float(reference_temperature), dtype=float)
-    heat_ys = [float(y) for y in heat_ys]
+    if heat_lines is None:
+        heat_lines = _build_heat_lines_from_ys(float(Lx), [float(y) for y in heat_ys])
+    heat_lines = _prepare_heat_lines(list(heat_lines))
 
     T_max_global = -np.inf
     t_at = 0.0
     x_src_at = 0.0
+    y_src_at = 0.0
     idx_at = 0
 
-    for step in range(int(steps)):
-        t = step * dt
-        x_pos, active_ys = _active_heat_sources_at_time(
-            t=float(t),
-            Lx=float(Lx),
-            velocity=float(velocity),
-            heat_ys=heat_ys,
-            heat_mode=str(heat_mode),
-            pass_gap=float(pass_gap),
-        )
+    temps_history: list[np.ndarray] = []
+    times_history: list[float] = []
 
+    t = 0.0
+    step = 0
+    if adaptive_dt and total_time is None:
+        raise ValueError("total_time is required when adaptive_dt is True")
+
+    next_log = 0.0
+    log_every = 0.0
+    if adaptive_dt:
+        log_every = max(1e-9, float(total_time) / 10.0)
+    else:
+        log_every = float(steps)
+
+    while True:
+        if adaptive_dt:
+            if t >= float(total_time) - 1e-12:
+                break
+            active_positions = _active_heat_sources_at_time(
+                t=float(t),
+                velocity=float(velocity),
+                heat_lines=heat_lines,
+                heat_mode=str(heat_mode),
+                pass_gap=float(pass_gap),
+            )
+            dt_step = float(dt_min if dt_min is not None else dt)
+            if not active_positions:
+                dt_step = float(dt_max if dt_max is not None else dt_step)
+        else:
+            if step >= int(steps):
+                break
+            dt_step = float(dt)
+            active_positions = _active_heat_sources_at_time(
+                t=float(t),
+                velocity=float(velocity),
+                heat_lines=heat_lines,
+                heat_mode=str(heat_mode),
+                pass_gap=float(pass_gap),
+            )
         # Optional uniform quench phase (stronger convection / different ambient)
-        h_conv_step = float(h_conv)
+        h_conv_top_step = float(h_conv_top)
+        h_conv_bottom_step = float(h_conv_bottom)
         ambient_step = float(ambient_temperature)
-        if quench_start is not None and quench_h_conv is not None and quench_ambient_temperature is not None:
+        if (
+            quench_start is not None
+            and quench_h_conv_top is not None
+            and quench_h_conv_bottom is not None
+            and quench_ambient_temperature is not None
+        ):
             if float(t) >= float(quench_start):
-                h_conv_step = float(quench_h_conv)
+                h_conv_top_step = float(quench_h_conv_top)
+                h_conv_bottom_step = float(quench_h_conv_bottom)
                 ambient_step = float(quench_ambient_temperature)
 
         # Picard iterations for temp-dependent K/M and linearized radiation
@@ -653,8 +844,8 @@ def solve_thermal_3d_with_peak(
             else:
                 K, M = assemble_heat_3d(nodes, tet, conductivity, density, heat_capacity)
 
-            Kb_top, rhs_top = assemble_convection_on_triangles(nodes, top_tri, h_conv_step, ambient_step)
-            Kb_bot, rhs_bot = assemble_convection_on_triangles(nodes, bottom_tri, h_conv_step, ambient_step)
+            Kb_top, rhs_top = assemble_convection_on_triangles(nodes, top_tri, h_conv_top_step, ambient_step)
+            Kb_bot, rhs_bot = assemble_convection_on_triangles(nodes, bottom_tri, h_conv_bottom_step, ambient_step)
             Kb = Kb_top + Kb_bot
             rhs_b = rhs_top + rhs_bot
 
@@ -669,13 +860,15 @@ def solve_thermal_3d_with_peak(
                 Kb = Kb + Kr_top + Kr_bot
                 rhs_b = rhs_b + rr_top + rr_bot
 
-            A = sp.diags(M / dt) + K + Kb
+            A = sp.diags(M / dt_step) + K + Kb
             solver = spla.factorized(A.tocsc())
 
-            rhs = (M / dt) * temperature + rhs_b
-            if x_pos is not None and active_ys:
-                for y in active_ys:
-                    rhs += assemble_gaussian_flux_on_triangles(nodes, top_tri, float(x_pos), float(y), q0, r0)
+            rhs = (M / dt_step) * temperature + rhs_b
+            if active_positions:
+                for x_pos, y_pos in active_positions:
+                    rhs += assemble_gaussian_flux_on_triangles(
+                        nodes, top_tri, float(x_pos), float(y_pos), q0, r0, gaussian_beta
+                    )
             T_iter = solver(rhs)
 
         temperature = np.asarray(T_iter, dtype=float)
@@ -686,26 +879,44 @@ def solve_thermal_3d_with_peak(
         if step_max > float(T_max_global):
             T_max_global = step_max
             t_at = float(t)
-            x_src_at = -1.0 if x_pos is None else float(x_pos)
+            if active_positions:
+                x_src_at = float(active_positions[0][0])
+                y_src_at = float(active_positions[0][1])
             idx_at = step_idx
 
-        if step % max(1, steps // 10) == 0:
-            x_disp = -1.0 if x_pos is None else float(x_pos)
-            print(
-                f"  Thermal step {step:5d}/{steps}, t={t:.2f}s, x={x_disp:.1f}mm, T_max={float(np.max(temperature)):.2f}K"
-            )
+        if return_history:
+            temps_history.append(temperature.copy())
+            times_history.append(float(t))
+
+        if float(t) >= next_log:
+            x_disp = -1.0 if not active_positions else float(active_positions[0][0])
+            if adaptive_dt:
+                print(
+                    f"  Thermal step {step:5d}, t={t:.2f}s, dt={dt_step:.3g}s, x={x_disp:.1f}mm, T_max={float(np.max(temperature)):.2f}K"
+                )
+            else:
+                print(
+                    f"  Thermal step {step:5d}/{steps}, t={t:.2f}s, x={x_disp:.1f}mm, T_max={float(np.max(temperature)):.2f}K"
+                )
+            next_log += log_every
+
+        step += 1
+        t += dt_step
 
     xyz = nodes[int(idx_at)]
     peak = {
         "T_max_global": float(T_max_global),
         "t_at_T_max_global": float(t_at),
         "x_source_at_T_max_global": float(x_src_at),
+        "y_source_at_T_max_global": float(y_src_at),
         "idx_at_T_max_global": float(idx_at),
         "x_at_T_max_global": float(xyz[0]),
         "y_at_T_max_global": float(xyz[1]),
         "z_at_T_max_global": float(xyz[2]),
     }
 
+    if return_history:
+        return np.asarray(temperature, dtype=float), peak, temps_history, times_history
     return np.asarray(temperature, dtype=float), peak
 
 
@@ -722,6 +933,9 @@ def solve_mechanics_3d(
     nu: float,
     alpha: float,
     reference_temperature: float,
+    E_elem: np.ndarray | None = None,
+    nu_elem: np.ndarray | None = None,
+    alpha_elem: np.ndarray | None = None,
     eps_inherent: np.ndarray | None = None,
 ) -> np.ndarray:
     n_nodes = int(nodes.shape[0])
@@ -731,37 +945,94 @@ def solve_mechanics_3d(
     tet_flat = tet.reshape(-1).tolist()
 
     print("  Assembling elasticity stiffness (C++)...")
-    asm = thermo_bindings.assemble_elasticity_3d(nodes_flat, tet_flat, float(E), float(nu))
+    if E_elem is None or nu_elem is None:
+        asm = thermo_bindings.assemble_elasticity_3d(nodes_flat, tet_flat, float(E), float(nu))
+    else:
+        asm = thermo_bindings.assemble_elasticity_3d_per_element(
+            nodes_flat,
+            tet_flat,
+            np.asarray(E_elem, dtype=float).tolist(),
+            np.asarray(nu_elem, dtype=float).tolist(),
+        )
     K = sp.coo_matrix((asm.values, (asm.rows, asm.cols)), shape=(asm.dof_count, asm.dof_count)).tocsr()
 
     print("  Computing load vector (C++)...")
     if eps_inherent is None:
-        F_th = np.asarray(
-            thermo_bindings.thermal_load_3d(
-                nodes_flat,
-                tet_flat,
-                np.asarray(temperature, dtype=float).tolist(),
-                float(E),
-                float(nu),
-                float(alpha),
-                float(reference_temperature),
-            ),
-            dtype=float,
-        )
+        if alpha_elem is None or E_elem is None or nu_elem is None:
+            F_th = np.asarray(
+                thermo_bindings.thermal_load_3d(
+                    nodes_flat,
+                    tet_flat,
+                    np.asarray(temperature, dtype=float).tolist(),
+                    float(E),
+                    float(nu),
+                    float(alpha),
+                    float(reference_temperature),
+                ),
+                dtype=float,
+            )
+        else:
+            F_th = np.asarray(
+                thermo_bindings.thermal_load_3d_per_element(
+                    nodes_flat,
+                    tet_flat,
+                    np.asarray(temperature, dtype=float).tolist(),
+                    np.asarray(E_elem, dtype=float).tolist(),
+                    np.asarray(nu_elem, dtype=float).tolist(),
+                    np.asarray(alpha_elem, dtype=float).tolist(),
+                    float(reference_temperature),
+                ),
+                dtype=float,
+            )
     else:
-        F_th = np.asarray(
-            thermo_bindings.thermal_load_3d_with_inherent(
-                nodes_flat,
-                tet_flat,
-                np.asarray(temperature, dtype=float).tolist(),
-                np.asarray(eps_inherent, dtype=float).tolist(),
-                float(E),
-                float(nu),
-                float(alpha),
-                float(reference_temperature),
-            ),
-            dtype=float,
-        )
+        if alpha_elem is None or E_elem is None or nu_elem is None:
+            F_th = np.asarray(
+                thermo_bindings.thermal_load_3d_with_inherent(
+                    nodes_flat,
+                    tet_flat,
+                    np.asarray(temperature, dtype=float).tolist(),
+                    np.asarray(eps_inherent, dtype=float).tolist(),
+                    float(E),
+                    float(nu),
+                    float(alpha),
+                    float(reference_temperature),
+                ),
+                dtype=float,
+            )
+        else:
+            F_th = np.asarray(
+                thermo_bindings.thermal_load_3d_with_inherent_per_element(
+                    nodes_flat,
+                    tet_flat,
+                    np.asarray(temperature, dtype=float).tolist(),
+                    np.asarray(eps_inherent, dtype=float).tolist(),
+                    np.asarray(E_elem, dtype=float).tolist(),
+                    np.asarray(nu_elem, dtype=float).tolist(),
+                    np.asarray(alpha_elem, dtype=float).tolist(),
+                    float(reference_temperature),
+                ),
+                dtype=float,
+            )
+
+    fixed, free = _resolve_mechanics_dofs(nodes, bottom_nodes, Lx, Ly, bc)
+
+    print(f"  Solving mechanics: {free.size} free DOFs ({n_dof} total)")
+    u_free = spla.spsolve(K[free, :][:, free], F_th[free])
+
+    u = np.zeros(n_dof, dtype=float)
+    u[free] = u_free
+    return u.reshape(-1, 3)
+
+
+def _resolve_mechanics_dofs(
+    nodes: np.ndarray,
+    bottom_nodes: np.ndarray,
+    Lx: float,
+    Ly: float,
+    bc: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    n_nodes = int(nodes.shape[0])
+    n_dof = 3 * n_nodes
 
     def _nearest_node(candidates: np.ndarray, target_xyz: tuple[float, float, float], exclude: set[int]) -> int:
         tgt = np.array(target_xyz, dtype=float)
@@ -785,9 +1056,25 @@ def solve_mechanics_3d(
         for nid in bottom_nodes:
             nid_int = int(nid)
             fixed.extend([3 * nid_int + 0, 3 * nid_int + 1, 3 * nid_int + 2])
+    elif bc_mode == "bottom_frictionless":
+        for nid in bottom_nodes:
+            nid_int = int(nid)
+            fixed.append(3 * nid_int + 2)
+
+        exclude: set[int] = set()
+        a = _nearest_node(bottom_nodes, (0.0, 0.0, 0.0), exclude)
+        exclude.add(a)
+        b = _nearest_node(bottom_nodes, (float(Lx), 0.0, 0.0), exclude)
+
+        fixed.extend([3 * a + 0, 3 * a + 1])
+        fixed.extend([3 * b + 1])
+    elif bc_mode == "centerline_fixed":
+        tol_y = max(1e-6, float(Ly) * 1e-4)
+        center_nodes = np.where(np.isclose(nodes[:, 1], float(Ly) / 2.0, atol=tol_y))[0]
+        for nid in center_nodes:
+            nid_int = int(nid)
+            fixed.extend([3 * nid_int + 0, 3 * nid_int + 1, 3 * nid_int + 2])
     elif bc_mode == "corner_pins":
-        # Ship-like: minimally constrain rigid body motion using 3 bottom-corner pins.
-        # A: fix (ux,uy,uz), B: fix (uy,uz), C: fix (uz)
         exclude: set[int] = set()
         a = _nearest_node(bottom_nodes, (0.0, 0.0, 0.0), exclude)
         exclude.add(a)
@@ -799,19 +1086,106 @@ def solve_mechanics_3d(
         fixed.extend([3 * b + 1, 3 * b + 2])
         fixed.extend([3 * c + 2])
     else:
-        raise ValueError(f"Unknown bc mode: {bc}. Use bottom_fixed or corner_pins")
+        raise ValueError(
+            f"Unknown bc mode: {bc}. Use bottom_fixed, bottom_frictionless, centerline_fixed, or corner_pins"
+        )
 
     fixed = np.asarray(sorted(set(fixed)), dtype=int)
-
     all_dofs = np.arange(n_dof, dtype=int)
     free = np.setdiff1d(all_dofs, fixed)
+    return fixed, free
 
-    print(f"  Solving mechanics: {free.size} free DOFs ({n_dof} total)")
-    u_free = spla.spsolve(K[free, :][:, free], F_th[free])
 
-    u = np.zeros(n_dof, dtype=float)
-    u[free] = u_free
-    return u.reshape(-1, 3)
+def solve_mechanics_3d_elastoplastic(
+    nodes: np.ndarray,
+    tet: np.ndarray,
+    temperature: np.ndarray,
+    bottom_nodes: np.ndarray,
+    Lx: float,
+    Ly: float,
+    thickness: float,
+    bc: str,
+    reference_temperature: float,
+    E_elem: np.ndarray,
+    nu_elem: np.ndarray,
+    alpha_elem: np.ndarray,
+    sigma_y0: float,
+    H_iso: float,
+    max_iters: int = 3,
+    tol: float = 1e-6,
+    u_prev: np.ndarray | None = None,
+    epsp_state: np.ndarray | None = None,
+    epbar_state: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    n_nodes = int(nodes.shape[0])
+    n_dof = 3 * n_nodes
+    n_elem = int(tet.shape[0])
+
+    nodes_flat = nodes.reshape(-1).tolist()
+    tet_flat = tet.reshape(-1).tolist()
+
+    if epsp_state is None:
+        epsp_state = np.zeros((n_elem, 6), dtype=float)
+    if epbar_state is None:
+        epbar_state = np.zeros(n_elem, dtype=float)
+
+    fixed, free = _resolve_mechanics_dofs(nodes, bottom_nodes, Lx, Ly, bc)
+
+    print(f"  Solving elastoplastic mechanics: {free.size} free DOFs ({n_dof} total)")
+
+    F_th = np.asarray(
+        thermo_bindings.thermal_load_3d_per_element(
+            nodes_flat,
+            tet_flat,
+            np.asarray(temperature, dtype=float).tolist(),
+            np.asarray(E_elem, dtype=float).tolist(),
+            np.asarray(nu_elem, dtype=float).tolist(),
+            np.asarray(alpha_elem, dtype=float).tolist(),
+            float(reference_temperature),
+        ),
+        dtype=float,
+    )
+
+    if u_prev is None:
+        u = np.zeros(n_dof, dtype=float)
+    else:
+        u = np.asarray(u_prev, dtype=float).reshape(-1)
+    for it in range(max(1, int(max_iters))):
+        asm = thermo_bindings.assemble_elastoplastic_3d_step(
+            nodes_flat,
+            tet_flat,
+            u.tolist(),
+            np.asarray(temperature, dtype=float).tolist(),
+            np.asarray(epsp_state, dtype=float).reshape(-1).tolist(),
+            np.asarray(epbar_state, dtype=float).tolist(),
+            np.asarray(E_elem, dtype=float).tolist(),
+            np.asarray(nu_elem, dtype=float).tolist(),
+            np.asarray(alpha_elem, dtype=float).tolist(),
+            float(reference_temperature),
+            float(sigma_y0),
+            float(H_iso),
+        )
+
+        K = sp.coo_matrix(
+            (asm.stiffness.values, (asm.stiffness.rows, asm.stiffness.cols)),
+            shape=(asm.stiffness.dof_count, asm.stiffness.dof_count),
+        ).tocsr()
+        F_int = np.asarray(asm.internal_force, dtype=float)
+
+        epsp_state = np.asarray(asm.epsp, dtype=float).reshape(n_elem, 6)
+        epbar_state = np.asarray(asm.epbar, dtype=float)
+
+        rhs = F_th - F_int
+        du_free = spla.spsolve(K[free, :][:, free], rhs[free])
+        u[free] += du_free
+
+        du_norm = float(np.linalg.norm(du_free))
+        u_norm = max(1e-12, float(np.linalg.norm(u[free])))
+        print(f"    ep-iter {it+1}: |du|={du_norm:.3e}, rel={du_norm / u_norm:.3e}")
+        if du_norm / u_norm <= tol:
+            break
+
+    return u.reshape(-1, 3), epsp_state, epbar_state
 
 
 def plot_outputs(
@@ -824,9 +1198,13 @@ def plot_outputs(
     Ly: float,
     thickness: float,
     heat_ys: list[float],
+    heat_lines: list[dict[str, float]] | None,
     out_dir: Path,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
+    if heat_lines is None:
+        heat_lines = _build_heat_lines_from_ys(float(Lx), [float(y) for y in heat_ys])
+    heat_lines = _prepare_heat_lines(list(heat_lines))
 
     # Sign convention: negative deflection = downward.
     w = -displacement[:, 2]
@@ -869,11 +1247,22 @@ def plot_outputs(
 
     fig, ax = plt.subplots(figsize=(10, 6))
     sc = ax.scatter(x_top, y_top, c=w_top, cmap="RdBu_r", s=18, edgecolors="k", linewidths=0.15)
-    plt.colorbar(sc, ax=ax, label="w (mm)")
+    plt.colorbar(sc, ax=ax, label="w (mm, negative = downward)")
     ax.set_aspect("equal")
     ax.set_title("Out-of-plane deflection on top surface (negative = downward)")
     ax.set_xlabel("x (mm)")
     ax.set_ylabel("y (mm)")
+    ax.annotate(
+        "down (−)",
+        xy=(0.96, 0.08),
+        xytext=(0.96, 0.22),
+        xycoords="axes fraction",
+        textcoords="axes fraction",
+        arrowprops=dict(arrowstyle="-|>", color="black", lw=1.0),
+        ha="center",
+        va="bottom",
+        fontsize=9,
+    )
     plt.tight_layout()
     plt.savefig(out_dir / "deflection_top.png", dpi=160)
     plt.close()
@@ -882,7 +1271,10 @@ def plot_outputs(
     if top_tri.size:
         # Keep only triangles fully on top surface
         top_node_set = set(np.where(top_mask)[0].tolist())
-        tri_top = np.asarray([t for t in top_tri if int(t[0]) in top_node_set and int(t[1]) in top_node_set and int(t[2]) in top_node_set], dtype=int)
+        tri_top = np.asarray(
+            [t for t in top_tri if int(t[0]) in top_node_set and int(t[1]) in top_node_set and int(t[2]) in top_node_set],
+            dtype=int,
+        )
         if tri_top.size:
             # remap to local indexing for plot_trisurf
             top_global = np.where(top_mask)[0]
@@ -892,7 +1284,7 @@ def plot_outputs(
 
             fig = plt.figure(figsize=(12, 8))
             ax = fig.add_subplot(111, projection="3d")
-            scale = max(1.0, 0.05 * Lx / (float(np.max(np.abs(w_top))) + 1e-12))
+            scale = 1.0
             surf = ax.plot_trisurf(
                 x_top,
                 y_top,
@@ -903,11 +1295,24 @@ def plot_outputs(
                 edgecolor="k",
                 alpha=0.9,
             )
-            fig.colorbar(surf, ax=ax, shrink=0.55, label=f"w (mm) × {scale:.1f} (neg=down)")
-            ax.set_title(f"Deflected top surface (scaled by {scale:.1f}×)")
+            fig.colorbar(surf, ax=ax, shrink=0.55, label="w (mm, negative = downward)")
+            ax.set_title("Deflected top surface (no scaling)")
             ax.set_xlabel("x (mm)")
             ax.set_ylabel("y (mm)")
-            ax.set_zlabel("scaled w")
+            ax.set_zlabel("w (mm, negative = downward)")
+            ax.invert_zaxis()
+            ax.quiver(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                -0.1,
+                color="black",
+                linewidth=1.0,
+                arrow_length_ratio=0.2,
+            )
+            ax.text(0.0, 0.0, -0.12, "down (−)", color="black", fontsize=9)
             plt.tight_layout()
             plt.savefig(out_dir / "deflection_3d.png", dpi=160)
             plt.close()
@@ -935,35 +1340,50 @@ def plot_outputs(
                 antialiased=True,
                 alpha=0.9,
             )
-            fig.colorbar(surf2, ax=ax, shrink=0.55, label=f"w (mm) × {scale:.1f} (neg=down)")
-            ax.set_title(f"Undeformed (gray) vs deformed (scaled {scale:.1f}×)")
+            fig.colorbar(surf2, ax=ax, shrink=0.55, label="w (mm, negative = downward)")
+            ax.set_title("Undeformed (gray) vs deformed (no scaling)")
             ax.set_xlabel("x (mm)")
             ax.set_ylabel("y (mm)")
-            ax.set_zlabel("scaled w")
+            ax.set_zlabel("w (mm, negative = downward)")
+            ax.invert_zaxis()
+            ax.quiver(
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                -0.1,
+                color="black",
+                linewidth=1.0,
+                arrow_length_ratio=0.2,
+            )
+            ax.text(0.0, 0.0, -0.12, "down (−)", color="black", fontsize=9)
             plt.tight_layout()
             plt.savefig(out_dir / "deflection_3d_overlay.png", dpi=160)
             plt.close()
 
-    # Heating line profiles (top surface near each heat y)
-    heat_ys = [float(y) for y in heat_ys]
+    # Heating line profiles (top surface near each heat line)
     band = max(Ly / 40.0, 1e-9)
     colors = ["tab:blue", "tab:green", "tab:orange", "tab:purple", "tab:red"]
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
     any_line = False
-    for i, y_center in enumerate(heat_ys):
-        line_mask = top_mask & (np.abs(nodes[:, 1] - y_center) < band)
-        x_c = nodes[line_mask, 0]
-        if x_c.size < 3:
+    xy_top = np.column_stack([x_top, y_top])
+    for i, ln in enumerate(heat_lines):
+        dist = _distance_to_segment(xy_top, ln)
+        mask = dist < band
+        if np.count_nonzero(mask) < 3:
             continue
         any_line = True
-        sort_idx = np.argsort(x_c)
-        x_c = x_c[sort_idx]
-        T_c = temperature[line_mask][sort_idx]
-        w_c = w[line_mask][sort_idx]
+        s = _along_line_coordinate(xy_top[mask], ln)
+        sort_idx = np.argsort(s)
+        s = s[sort_idx]
+        T_c = T_top[mask][sort_idx]
+        w_c = w_top[mask][sort_idx]
 
+        label = f"({ln['x0']:.0f},{ln['y0']:.0f})→({ln['x1']:.0f},{ln['y1']:.0f})"
         c = colors[i % len(colors)]
-        ax1.plot(x_c, T_c, ".-", color=c, linewidth=2, label=f"y≈{y_center:.0f} mm")
-        ax2.plot(x_c, w_c, ".-", color=c, linewidth=2, label=f"y≈{y_center:.0f} mm")
+        ax1.plot(s, T_c, ".-", color=c, linewidth=2, label=label)
+        ax2.plot(s, w_c, ".-", color=c, linewidth=2, label=label)
 
     if any_line:
         ax1.set_ylabel("T (K)")
@@ -971,11 +1391,22 @@ def plot_outputs(
         ax1.set_title("Along heating line(s) (top surface)")
         ax1.legend(loc="best")
 
-        ax2.set_xlabel("x (mm)")
-        ax2.set_ylabel("w (mm)")
+        ax2.set_xlabel("s along line (mm)")
+        ax2.set_ylabel("w (mm, negative = downward)")
         ax2.axhline(0.0, color="k", linestyle="--", linewidth=0.8)
         ax2.grid(True, alpha=0.3)
         ax2.legend(loc="best")
+        ax2.annotate(
+            "down (−)",
+            xy=(0.98, 0.12),
+            xytext=(0.98, 0.28),
+            xycoords="axes fraction",
+            textcoords="axes fraction",
+            arrowprops=dict(arrowstyle="-|>", color="black", lw=1.0),
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
 
         plt.tight_layout()
         plt.savefig(out_dir / "heating_line_profiles.png", dpi=160)
@@ -1018,12 +1449,26 @@ def plot_outputs(
     ax.plot(centers, w_bot_mean, color="tab:orange", alpha=0.6, linewidth=1.5, label="bottom w")
     ax.axhline(0.0, color="k", linestyle="--", linewidth=0.8)
     ax.set_xlabel("y (mm)")
-    ax.set_ylabel("w (mm)")
+    ax.set_ylabel("w (mm, negative = downward)")
     ax.set_title(f"Width camber profile near x≈{x0:.1f} mm (band ±{x_band:.1f} mm)")
     ax.grid(True, alpha=0.3)
     ax.legend(loc="best")
+    ax.annotate(
+        "down (−)",
+        xy=(0.98, 0.12),
+        xytext=(0.98, 0.28),
+        xycoords="axes fraction",
+        textcoords="axes fraction",
+        arrowprops=dict(arrowstyle="-|>", color="black", lw=1.0),
+        ha="center",
+        va="bottom",
+        fontsize=9,
+    )
     plt.tight_layout()
     plt.savefig(out_dir / "camber_width_profile.png", dpi=160)
+    csv_path = out_dir / "camber_width_profile.csv"
+    header = "y_mm,w_mid_mm,w_top_mm,w_bot_mm"
+    np.savetxt(csv_path, np.column_stack([centers, w_mid, w_top_mean, w_bot_mean]), delimiter=",", header=header)
     plt.close()
 
 
@@ -1185,6 +1630,22 @@ def main() -> None:
         default=None,
         help="Comma-separated heating-line y positions (mm) to apply simultaneously, e.g. '250,500,750'.",
     )
+    parser.add_argument(
+        "--heat-lines",
+        type=str,
+        default=None,
+        help=(
+            "JSON list of line segments for arbitrary orientations. "
+            "Each item can be [x0,y0,x1,y1] or {x0,y0,x1,y1}. "
+            "You can also pass a file path or '@file.json'."
+        ),
+    )
+    parser.add_argument(
+        "--heat-lines-file",
+        type=str,
+        default=None,
+        help="Path to JSON file containing a list of heat line segments.",
+    )
 
     parser.add_argument(
         "--heat-mode",
@@ -1192,6 +1653,12 @@ def main() -> None:
         default="simultaneous",
         choices=["simultaneous", "sequential"],
         help="Heating mode: simultaneous (all lines at once) or sequential (multi-pass, one line after another).",
+    )
+    parser.add_argument(
+        "--pass-repeats",
+        type=int,
+        default=1,
+        help="Repeat the sequential pass list N times (ignored in simultaneous mode).",
     )
     parser.add_argument(
         "--pass-gap",
@@ -1210,6 +1677,9 @@ def main() -> None:
     parser.add_argument("--target-Tmax-iters", type=int, default=3, help="max q0 auto-tune iterations")
 
     parser.add_argument("--dt", type=float, default=0.5, help="time step (s)")
+    parser.add_argument("--adaptive-dt", action="store_true", help="enable adaptive thermal time stepping")
+    parser.add_argument("--dt-min", type=float, default=None, help="minimum adaptive dt (s)")
+    parser.add_argument("--dt-max", type=float, default=None, help="maximum adaptive dt (s)")
     parser.add_argument("--extra-time", type=float, default=50.0, help="extra time after scanning (s)")
 
     parser.add_argument("--k", type=float, default=0.045, help="thermal conductivity (W/mm/K)")
@@ -1219,6 +1689,18 @@ def main() -> None:
     parser.add_argument("--cp-slope", type=float, default=0.0, help="linear cp(T) slope: cp=cp0*(1+cp_slope*(T-T_ref))")
 
     parser.add_argument("--h-conv", type=float, default=5e-5, help="convective coefficient (W/mm^2/K)")
+    parser.add_argument(
+        "--h-conv-top",
+        type=float,
+        default=None,
+        help="top-surface convection (W/mm^2/K). Overrides --h-conv for top if set.",
+    )
+    parser.add_argument(
+        "--h-conv-bottom",
+        type=float,
+        default=None,
+        help="bottom-surface convection (W/mm^2/K). Overrides --h-conv for bottom if set.",
+    )
     parser.add_argument("--quench", action="store_true", help="enable uniform quench phase after heating")
     parser.add_argument(
         "--quench-start",
@@ -1233,15 +1715,52 @@ def main() -> None:
         help="quench convection coefficient (W/mm^2/K). Example: 5e-3 for strong quench.",
     )
     parser.add_argument(
+        "--quench-h-conv-top",
+        type=float,
+        default=None,
+        help="quench convection on top surface (W/mm^2/K). Overrides --quench-h-conv for top if set.",
+    )
+    parser.add_argument(
+        "--quench-h-conv-bottom",
+        type=float,
+        default=None,
+        help="quench convection on bottom surface (W/mm^2/K). Overrides --quench-h-conv for bottom if set.",
+    )
+    parser.add_argument(
         "--quench-T-inf",
         type=float,
         default=None,
         help="quench ambient temperature (K). Default: T_inf.",
     )
     parser.add_argument("--emissivity", type=float, default=0.0, help="radiation emissivity (0 disables radiation)")
+    parser.add_argument(
+        "--gaussian-beta",
+        type=float,
+        default=2.0,
+        help="Gaussian heat flux exponent beta in exp(-beta*r^2/r0^2). Use 3.0 for Li et al. (2023).",
+    )
     parser.add_argument("--picard", type=int, default=1, help="Picard iterations per time step for k(T)/cp(T)/radiation")
     parser.add_argument("--T-inf", type=float, default=293.0, help="ambient temperature (K)")
     parser.add_argument("--T-ref", type=float, default=293.0, help="reference temperature (K)")
+
+    parser.add_argument(
+        "--E-table",
+        type=str,
+        default=None,
+        help="Temperature-dependent E table as 'T_C:MPa,...' (e.g., '20:205000,250:187000').",
+    )
+    parser.add_argument(
+        "--nu-table",
+        type=str,
+        default=None,
+        help="Temperature-dependent nu table as 'T_C:nu,...'",
+    )
+    parser.add_argument(
+        "--alpha-table",
+        type=str,
+        default=None,
+        help="Temperature-dependent alpha table as 'T_C:alpha,...' (1/K).",
+    )
 
     parser.add_argument("--E", type=float, default=210e3, help="Young's modulus (MPa)")
     parser.add_argument("--nu", type=float, default=0.3, help="Poisson's ratio")
@@ -1251,8 +1770,12 @@ def main() -> None:
         "--bc",
         type=str,
         default="bottom_fixed",
-        choices=["bottom_fixed", "corner_pins"],
-        help="Mechanical boundary condition: bottom_fixed (legacy) or corner_pins (ship-like free plate).",
+        choices=["bottom_fixed", "bottom_frictionless", "centerline_fixed", "corner_pins"],
+        help=(
+            "Mechanical boundary condition: bottom_fixed (table clamped), "
+            "bottom_frictionless (table support with in-plane slip), "
+            "centerline_fixed (fix along y=Ly/2), or corner_pins (ship-like free plate)."
+        ),
     )
 
     # Inherent strain (plasticity surrogate)
@@ -1260,6 +1783,15 @@ def main() -> None:
     parser.add_argument("--eps0", type=float, default=0.0, help="peak inherent isotropic strain (dimensionless, e.g., 2e-4)")
     parser.add_argument("--inh-sigma", type=float, default=20.0, help="inherent band half-width (mm) around heating line")
     parser.add_argument("--inh-zfrac", type=float, default=0.5, help="inherent depth fraction (0..1 of thickness from top)")
+
+    # Elastoplastic (J2) integration
+    parser.add_argument("--use-elastoplastic", action="store_true", help="enable J2 elastoplastic mechanics")
+    parser.add_argument("--sigma-y0", type=float, default=250.0, help="yield stress at reference temperature (MPa)")
+    parser.add_argument("--hardening-H", type=float, default=1000.0, help="isotropic hardening modulus H (MPa)")
+    parser.add_argument("--plastic-iters", type=int, default=3, help="max elastoplastic Newton iterations")
+    parser.add_argument("--plastic-tol", type=float, default=1e-6, help="relative tolerance for elastoplastic solve")
+    parser.add_argument("--strong-coupling", action="store_true", help="advance elastoplastic state each thermal step")
+    parser.add_argument("--coupling-mech-iters", type=int, default=1, help="mechanical iterations per thermal step")
 
     parser.add_argument("--out", type=str, default="outputs_3d", help="output directory")
 
@@ -1280,28 +1812,45 @@ def main() -> None:
     effective_h_refine = args.h_refine if args.h_refine is not None else args.h / 3.0
     print(f"Mesh: h={args.h} mm, h_refine={effective_h_refine:.2f} mm, refine_band={args.refine_band} mm")
     heat_ys: list[float] = []
-    if args.heat_y_list is not None:
-        for token in str(args.heat_y_list).split(","):
-            token = token.strip()
-            if token:
-                heat_ys.append(float(token))
-    if args.heat_y is not None:
-        heat_ys.append(float(args.heat_y))
-    if not heat_ys:
-        heat_ys = [float(args.Ly / 2.0)]
+    heat_lines_raw = _load_heat_lines_arg(args.heat_lines, args.heat_lines_file)
+    if heat_lines_raw is None:
+        if args.heat_y_list is not None:
+            for token in str(args.heat_y_list).split(","):
+                token = token.strip()
+                if token:
+                    heat_ys.append(float(token))
+        if args.heat_y is not None:
+            heat_ys.append(float(args.heat_y))
+        if not heat_ys:
+            heat_ys = [float(args.Ly / 2.0)]
 
-    # remove duplicates while preserving order
-    seen: set[float] = set()
-    heat_ys_unique: list[float] = []
-    for y in heat_ys:
-        key = float(y)
-        if key in seen:
-            continue
-        seen.add(key)
-        heat_ys_unique.append(key)
-    heat_ys = heat_ys_unique
+        if str(args.heat_mode).lower() == "simultaneous":
+            # remove duplicates while preserving order
+            seen: set[float] = set()
+            heat_ys_unique: list[float] = []
+            for y in heat_ys:
+                key = float(y)
+                if key in seen:
+                    continue
+                seen.add(key)
+                heat_ys_unique.append(key)
+            heat_ys = heat_ys_unique
+        else:
+            repeats = max(1, int(args.pass_repeats))
+            heat_ys = [float(y) for y in heat_ys] * repeats
 
-    print(f"Heating line(s): y={', '.join(f'{y:.3g}' for y in heat_ys)} mm")
+        heat_lines = _build_heat_lines_from_ys(float(args.Lx), heat_ys)
+    else:
+        heat_lines = heat_lines_raw
+        if str(args.heat_mode).lower() == "sequential":
+            repeats = max(1, int(args.pass_repeats))
+            heat_lines = list(heat_lines) * repeats
+        heat_ys = [float(ln["y0"]) for ln in heat_lines if abs(float(ln["y0"]) - float(ln["y1"])) < 1e-9]
+
+    if heat_lines_raw is None:
+        print(f"Heating line(s): y={', '.join(f'{y:.3g}' for y in heat_ys)} mm")
+    else:
+        print(f"Heating line(s): {len(heat_lines)} segments")
     print(f"BC: {args.bc}")
 
     print("\nStep 1: Meshing...")
@@ -1313,16 +1862,20 @@ def main() -> None:
         args.h_refine,
         args.refine_band,
         heat_ys,
+        heat_lines,
         out_dir,
     )
     print(f"  Nodes={nodes.shape[0]} Tets={tet.shape[0]} TopTri={top_tri.shape[0]} BottomTri={bottom_tri.shape[0]}")
 
-    scan_time_per_pass = args.Lx / args.velocity
+    prepared_lines = _prepare_heat_lines(list(heat_lines))
+    lengths = [float(ln["length"]) for ln in prepared_lines]
+    max_len = max(lengths) if lengths else float(args.Lx)
+    scan_time_per_pass = float(max_len) / float(args.velocity)
     if str(args.heat_mode).lower() == "sequential":
-        n_passes = int(len(heat_ys))
-        scan_time_total = float(n_passes) * float(scan_time_per_pass) + float(max(0.0, n_passes - 1)) * float(
-            max(0.0, args.pass_gap)
-        )
+        n_passes = int(len(prepared_lines))
+        scan_time_total = sum(float(ln["length"]) / float(args.velocity) for ln in prepared_lines)
+        if n_passes > 1:
+            scan_time_total += float(max(0.0, n_passes - 1)) * float(max(0.0, args.pass_gap))
     else:
         scan_time_total = float(scan_time_per_pass)
 
@@ -1332,12 +1885,28 @@ def main() -> None:
     total_time = float(scan_time_total) + float(args.extra_time)
     steps = int(np.ceil(total_time / args.dt))
 
+    h_conv_top = float(args.h_conv_top) if args.h_conv_top is not None else float(args.h_conv)
+    h_conv_bottom = float(args.h_conv_bottom) if args.h_conv_bottom is not None else float(args.h_conv)
+
     quench_start = None
-    quench_h_conv = None
+    quench_h_conv_top = None
+    quench_h_conv_bottom = None
     quench_T_inf = None
     if args.quench:
         quench_start = float(scan_time_total) if args.quench_start is None else float(args.quench_start)
-        quench_h_conv = float(args.quench_h_conv) if args.quench_h_conv is not None else float(args.h_conv)
+        if args.quench_h_conv_top is not None:
+            quench_h_conv_top = float(args.quench_h_conv_top)
+        elif args.quench_h_conv is not None:
+            quench_h_conv_top = float(args.quench_h_conv)
+        else:
+            quench_h_conv_top = float(h_conv_top)
+
+        if args.quench_h_conv_bottom is not None:
+            quench_h_conv_bottom = float(args.quench_h_conv_bottom)
+        elif args.quench_h_conv is not None:
+            quench_h_conv_bottom = float(args.quench_h_conv)
+        else:
+            quench_h_conv_bottom = float(h_conv_bottom)
         quench_T_inf = float(args.T_inf) if args.quench_T_inf is None else float(args.quench_T_inf)
 
     print("\nStep 2: Thermal solve...")
@@ -1347,6 +1916,8 @@ def main() -> None:
     q0_used = float(args.q0)
     temperature = None
     thermal_peak = None
+    temps_history: list[np.ndarray] | None = None
+    times_history: list[float] | None = None
 
     if args.target_Tmax is not None:
         target = float(args.target_Tmax)
@@ -1362,6 +1933,7 @@ def main() -> None:
                 Lx=args.Lx,
                 Ly=args.Ly,
                 heat_ys=heat_ys,
+                heat_lines=heat_lines,
                 heat_mode=str(args.heat_mode),
                 pass_gap=float(args.pass_gap),
                 dt=args.dt,
@@ -1372,7 +1944,8 @@ def main() -> None:
                 q0=q0_used,
                 r0=args.r0,
                 velocity=args.velocity,
-                h_conv=args.h_conv,
+                h_conv_top=h_conv_top,
+                h_conv_bottom=h_conv_bottom,
                 ambient_temperature=args.T_inf,
                 reference_temperature=args.T_ref,
                 k_slope=args.k_slope,
@@ -1380,8 +1953,14 @@ def main() -> None:
                 radiation_emissivity=args.emissivity,
                 picard_iters=args.picard,
                 quench_start=quench_start,
-                quench_h_conv=quench_h_conv,
+                quench_h_conv_top=quench_h_conv_top,
+                quench_h_conv_bottom=quench_h_conv_bottom,
                 quench_ambient_temperature=quench_T_inf,
+                gaussian_beta=args.gaussian_beta,
+                adaptive_dt=bool(args.adaptive_dt),
+                total_time=total_time,
+                dt_min=args.dt_min,
+                dt_max=args.dt_max,
             )
 
             peak = float(thermal_peak["T_max_global"])
@@ -1398,76 +1977,297 @@ def main() -> None:
             q0_used *= scale
 
         print(f"  Tuned q0_used={q0_used:.6g} (initial {float(args.q0):.6g})")
+
+        if args.use_elastoplastic and args.strong_coupling:
+            temperature, thermal_peak, temps_history, times_history = solve_thermal_3d_with_peak(
+                nodes=nodes,
+                tet=tet,
+                top_tri=top_tri,
+                bottom_tri=bottom_tri,
+                Lx=args.Lx,
+                Ly=args.Ly,
+                heat_ys=heat_ys,
+                heat_lines=heat_lines,
+                heat_mode=str(args.heat_mode),
+                pass_gap=float(args.pass_gap),
+                dt=args.dt,
+                steps=steps,
+                conductivity=args.k,
+                density=args.rho,
+                heat_capacity=args.cp,
+                q0=q0_used,
+                r0=args.r0,
+                velocity=args.velocity,
+                h_conv_top=h_conv_top,
+                h_conv_bottom=h_conv_bottom,
+                ambient_temperature=args.T_inf,
+                reference_temperature=args.T_ref,
+                k_slope=args.k_slope,
+                cp_slope=args.cp_slope,
+                radiation_emissivity=args.emissivity,
+                picard_iters=args.picard,
+                quench_start=quench_start,
+                quench_h_conv_top=quench_h_conv_top,
+                quench_h_conv_bottom=quench_h_conv_bottom,
+                quench_ambient_temperature=quench_T_inf,
+                gaussian_beta=args.gaussian_beta,
+                adaptive_dt=bool(args.adaptive_dt),
+                total_time=total_time,
+                dt_min=args.dt_min,
+                dt_max=args.dt_max,
+                return_history=True,
+            )
     else:
-        temperature, thermal_peak = solve_thermal_3d_with_peak(
-            nodes=nodes,
-            tet=tet,
-            top_tri=top_tri,
-            bottom_tri=bottom_tri,
-            Lx=args.Lx,
-            Ly=args.Ly,
-            heat_ys=heat_ys,
-            heat_mode=str(args.heat_mode),
-            pass_gap=float(args.pass_gap),
-            dt=args.dt,
-            steps=steps,
-            conductivity=args.k,
-            density=args.rho,
-            heat_capacity=args.cp,
-            q0=q0_used,
-            r0=args.r0,
-            velocity=args.velocity,
-            h_conv=args.h_conv,
-            ambient_temperature=args.T_inf,
-            reference_temperature=args.T_ref,
-            k_slope=args.k_slope,
-            cp_slope=args.cp_slope,
-            radiation_emissivity=args.emissivity,
-            picard_iters=args.picard,
-            quench_start=quench_start,
-            quench_h_conv=quench_h_conv,
-            quench_ambient_temperature=quench_T_inf,
-        )
+        if args.use_elastoplastic and args.strong_coupling:
+            temperature, thermal_peak, temps_history, times_history = solve_thermal_3d_with_peak(
+                nodes=nodes,
+                tet=tet,
+                top_tri=top_tri,
+                bottom_tri=bottom_tri,
+                Lx=args.Lx,
+                Ly=args.Ly,
+                heat_ys=heat_ys,
+                heat_lines=heat_lines,
+                heat_mode=str(args.heat_mode),
+                pass_gap=float(args.pass_gap),
+                dt=args.dt,
+                steps=steps,
+                conductivity=args.k,
+                density=args.rho,
+                heat_capacity=args.cp,
+                q0=q0_used,
+                r0=args.r0,
+                velocity=args.velocity,
+                h_conv_top=h_conv_top,
+                h_conv_bottom=h_conv_bottom,
+                ambient_temperature=args.T_inf,
+                reference_temperature=args.T_ref,
+                k_slope=args.k_slope,
+                cp_slope=args.cp_slope,
+                radiation_emissivity=args.emissivity,
+                picard_iters=args.picard,
+                quench_start=quench_start,
+                quench_h_conv_top=quench_h_conv_top,
+                quench_h_conv_bottom=quench_h_conv_bottom,
+                quench_ambient_temperature=quench_T_inf,
+                gaussian_beta=args.gaussian_beta,
+                adaptive_dt=bool(args.adaptive_dt),
+                total_time=total_time,
+                dt_min=args.dt_min,
+                dt_max=args.dt_max,
+                return_history=True,
+            )
+        else:
+            temperature, thermal_peak = solve_thermal_3d_with_peak(
+                nodes=nodes,
+                tet=tet,
+                top_tri=top_tri,
+                bottom_tri=bottom_tri,
+                Lx=args.Lx,
+                Ly=args.Ly,
+                heat_ys=heat_ys,
+                heat_lines=heat_lines,
+                heat_mode=str(args.heat_mode),
+                pass_gap=float(args.pass_gap),
+                dt=args.dt,
+                steps=steps,
+                conductivity=args.k,
+                density=args.rho,
+                heat_capacity=args.cp,
+                q0=q0_used,
+                r0=args.r0,
+                velocity=args.velocity,
+                h_conv_top=h_conv_top,
+                h_conv_bottom=h_conv_bottom,
+                ambient_temperature=args.T_inf,
+                reference_temperature=args.T_ref,
+                k_slope=args.k_slope,
+                cp_slope=args.cp_slope,
+                radiation_emissivity=args.emissivity,
+                picard_iters=args.picard,
+                quench_start=quench_start,
+                quench_h_conv_top=quench_h_conv_top,
+                quench_h_conv_bottom=quench_h_conv_bottom,
+                quench_ambient_temperature=quench_T_inf,
+                gaussian_beta=args.gaussian_beta,
+                adaptive_dt=bool(args.adaptive_dt),
+                total_time=total_time,
+                dt_min=args.dt_min,
+                dt_max=args.dt_max,
+            )
 
     assert temperature is not None
     assert thermal_peak is not None
     print(f"  T range: [{float(np.min(temperature)):.2f}, {float(np.max(temperature)):.2f}] K")
 
     print("\nStep 3: Mechanics solve...")
+    if args.strong_coupling and not args.use_elastoplastic:
+        print("  Note: strong_coupling is only applied with elastoplastic mode; using single-step elasticity.")
     eps_inherent = None
-    if args.use_inherent and args.eps0 != 0.0:
+    if args.use_elastoplastic and args.use_inherent:
+        print("  Note: use_elastoplastic overrides use_inherent; ignoring inherent strain.")
+    if (not args.use_elastoplastic) and args.use_inherent and args.eps0 != 0.0:
         # Simple inherent strain field: band around heating line on the top portion of thickness.
         band = float(args.inh_sigma)
         band_w = np.zeros(nodes.shape[0], dtype=float)
-        for y_center in heat_ys:
-            y_dist = np.abs(nodes[:, 1] - float(y_center))
-            band_w += np.exp(-0.5 * (y_dist / max(1e-9, band)) ** 2)
+        xy = nodes[:, :2]
+        for ln in _prepare_heat_lines(list(heat_lines)):
+            dist = _distance_to_segment(xy, ln)
+            band_w += np.exp(-0.5 * (dist / max(1e-9, band)) ** 2)
 
         z_cut = float(args.thickness) * float(np.clip(args.inh_zfrac, 0.0, 1.0))
         z_mask = (nodes[:, 2] >= float(args.thickness) - z_cut).astype(float)
 
         eps_inherent = float(args.eps0) * band_w * z_mask
 
-    displacement = solve_mechanics_3d(
-        nodes,
-        tet,
-        temperature,
-        bottom_nodes,
-        args.Lx,
-        args.Ly,
-        args.thickness,
-        args.bc,
-        args.E,
-        args.nu,
-        args.alpha,
-        args.T_ref,
-        eps_inherent=eps_inherent,
-    )
+    E_table = _parse_temp_table(args.E_table)
+    nu_table = _parse_temp_table(args.nu_table)
+    alpha_table = _parse_temp_table(args.alpha_table)
+
+    E_elem = None
+    nu_elem = None
+    alpha_elem = None
+    if E_table is not None or nu_table is not None or alpha_table is not None:
+        if E_table is None or nu_table is None or alpha_table is None:
+            raise ValueError("E_table, nu_table, and alpha_table must all be set together.")
+        if tet.size % 4 != 0:
+            raise ValueError("Invalid tet connectivity for element mapping")
+        tet_nodes = tet.reshape(-1, 4)
+        t_elem = 0.25 * (temperature[tet_nodes[:, 0]] + temperature[tet_nodes[:, 1]] +
+                         temperature[tet_nodes[:, 2]] + temperature[tet_nodes[:, 3]])
+        E_elem = _interp_table(t_elem, E_table)
+        nu_elem = _interp_table(t_elem, nu_table)
+        alpha_elem = _interp_table(t_elem, alpha_table)
+
+    if args.use_elastoplastic:
+        if E_elem is None or nu_elem is None or alpha_elem is None:
+            n_elem = int(tet.shape[0])
+            E_elem = np.full(n_elem, float(args.E), dtype=float)
+            nu_elem = np.full(n_elem, float(args.nu), dtype=float)
+            alpha_elem = np.full(n_elem, float(args.alpha), dtype=float)
+
+        displacement, epsp_state, epbar_state = solve_mechanics_3d_elastoplastic(
+            nodes,
+            tet,
+            temperature,
+            bottom_nodes,
+            args.Lx,
+            args.Ly,
+            args.thickness,
+            args.bc,
+            args.T_ref,
+            E_elem=E_elem,
+            nu_elem=nu_elem,
+            alpha_elem=alpha_elem,
+            sigma_y0=args.sigma_y0,
+            H_iso=args.hardening_H,
+            max_iters=args.plastic_iters,
+            tol=args.plastic_tol,
+        )
+    else:
+        if args.use_elastoplastic and args.strong_coupling:
+            if temps_history is None:
+                raise RuntimeError("Strong coupling requested but thermal history is missing")
+            u_prev = None
+            epsp_state = None
+            epbar_state = None
+            for T_step in temps_history:
+                if E_table is None or nu_table is None or alpha_table is None:
+                    n_elem = int(tet.shape[0])
+                    E_elem_step = np.full(n_elem, float(args.E), dtype=float)
+                    nu_elem_step = np.full(n_elem, float(args.nu), dtype=float)
+                    alpha_elem_step = np.full(n_elem, float(args.alpha), dtype=float)
+                else:
+                    tet_nodes = tet.reshape(-1, 4)
+                    t_elem = 0.25 * (T_step[tet_nodes[:, 0]] + T_step[tet_nodes[:, 1]] +
+                                     T_step[tet_nodes[:, 2]] + T_step[tet_nodes[:, 3]])
+                    E_elem_step = _interp_table(t_elem, E_table)
+                    nu_elem_step = _interp_table(t_elem, nu_table)
+                    alpha_elem_step = _interp_table(t_elem, alpha_table)
+
+                displacement, epsp_state, epbar_state = solve_mechanics_3d_elastoplastic(
+                    nodes,
+                    tet,
+                    T_step,
+                    bottom_nodes,
+                    args.Lx,
+                    args.Ly,
+                    args.thickness,
+                    args.bc,
+                    args.T_ref,
+                    E_elem=E_elem_step,
+                    nu_elem=nu_elem_step,
+                    alpha_elem=alpha_elem_step,
+                    sigma_y0=args.sigma_y0,
+                    H_iso=args.hardening_H,
+                    max_iters=args.coupling_mech_iters,
+                    tol=args.plastic_tol,
+                    u_prev=u_prev,
+                    epsp_state=epsp_state,
+                    epbar_state=epbar_state,
+                )
+                u_prev = displacement
+        elif args.use_elastoplastic:
+            if E_elem is None or nu_elem is None or alpha_elem is None:
+                n_elem = int(tet.shape[0])
+                E_elem = np.full(n_elem, float(args.E), dtype=float)
+                nu_elem = np.full(n_elem, float(args.nu), dtype=float)
+                alpha_elem = np.full(n_elem, float(args.alpha), dtype=float)
+
+            displacement, _, _ = solve_mechanics_3d_elastoplastic(
+                nodes,
+                tet,
+                temperature,
+                bottom_nodes,
+                args.Lx,
+                args.Ly,
+                args.thickness,
+                args.bc,
+                args.T_ref,
+                E_elem=E_elem,
+                nu_elem=nu_elem,
+                alpha_elem=alpha_elem,
+                sigma_y0=args.sigma_y0,
+                H_iso=args.hardening_H,
+                max_iters=args.plastic_iters,
+                tol=args.plastic_tol,
+            )
+        else:
+            displacement = solve_mechanics_3d(
+                nodes,
+                tet,
+                temperature,
+                bottom_nodes,
+                args.Lx,
+                args.Ly,
+                args.thickness,
+                args.bc,
+                args.E,
+                args.nu,
+                args.alpha,
+                args.T_ref,
+                E_elem=E_elem,
+                nu_elem=nu_elem,
+                alpha_elem=alpha_elem,
+                eps_inherent=eps_inherent,
+            )
     w = -displacement[:, 2]
     print(f"  w range (negative = downward): [{float(np.min(w)):.6g}, {float(np.max(w)):.6g}] mm")
 
     print("\nStep 4: Write outputs...")
-    plot_outputs(nodes, tet, top_tri, temperature, displacement, args.Lx, args.Ly, args.thickness, heat_ys, out_dir)
+    plot_outputs(
+        nodes,
+        tet,
+        top_tri,
+        temperature,
+        displacement,
+        args.Lx,
+        args.Ly,
+        args.thickness,
+        heat_ys,
+        heat_lines,
+        out_dir,
+    )
 
     np.save(out_dir / "nodes.npy", nodes)
     np.save(out_dir / "tet.npy", tet)
@@ -1500,8 +2300,13 @@ def main() -> None:
             "velocity": float(args.velocity),
             "heat_mode": str(args.heat_mode),
             "pass_gap": float(args.pass_gap),
-            "heat_y": float(heat_ys[0]),
+            "pass_repeats": float(args.pass_repeats),
+            "heat_y": (None if not heat_ys else float(heat_ys[0])),
             "heat_y_list": [float(y) for y in heat_ys],
+            "heat_lines": [
+                {"x0": float(ln["x0"]), "y0": float(ln["y0"]), "x1": float(ln["x1"]), "y1": float(ln["y1"])}
+                for ln in heat_lines
+            ],
             "target_Tmax": (None if args.target_Tmax is None else float(args.target_Tmax)),
             "dt": float(args.dt),
             "steps": float(steps),
@@ -1515,19 +2320,37 @@ def main() -> None:
             "cp": float(args.cp),
             "cp_slope": float(args.cp_slope),
             "h_conv": float(args.h_conv),
+            "h_conv_top": float(h_conv_top),
+            "h_conv_bottom": float(h_conv_bottom),
             "quench": bool(args.quench),
             "quench_start": (None if quench_start is None else float(quench_start)),
-            "quench_h_conv": (None if quench_h_conv is None else float(quench_h_conv)),
+            "quench_h_conv": (None if args.quench_h_conv is None else float(args.quench_h_conv)),
+            "quench_h_conv_top": (None if quench_h_conv_top is None else float(quench_h_conv_top)),
+            "quench_h_conv_bottom": (None if quench_h_conv_bottom is None else float(quench_h_conv_bottom)),
             "quench_T_inf": (None if quench_T_inf is None else float(quench_T_inf)),
+            "gaussian_beta": float(args.gaussian_beta),
             "emissivity": float(args.emissivity),
             "picard": float(args.picard),
             "T_inf": float(args.T_inf),
             "T_ref": float(args.T_ref),
+            "E_table": (None if args.E_table is None else str(args.E_table)),
+            "nu_table": (None if args.nu_table is None else str(args.nu_table)),
+            "alpha_table": (None if args.alpha_table is None else str(args.alpha_table)),
             "E": float(args.E),
             "nu": float(args.nu),
             "alpha": float(args.alpha),
+            "adaptive_dt": bool(args.adaptive_dt),
+            "dt_min": (None if args.dt_min is None else float(args.dt_min)),
+            "dt_max": (None if args.dt_max is None else float(args.dt_max)),
             "bc": str(args.bc),
             "use_inherent": bool(args.use_inherent),
+            "use_elastoplastic": bool(args.use_elastoplastic),
+            "strong_coupling": bool(args.strong_coupling),
+            "coupling_mech_iters": int(args.coupling_mech_iters),
+            "sigma_y0": float(args.sigma_y0),
+            "hardening_H": float(args.hardening_H),
+            "plastic_iters": int(args.plastic_iters),
+            "plastic_tol": float(args.plastic_tol),
             "eps0": float(args.eps0),
             "inh_sigma": float(args.inh_sigma),
             "inh_zfrac": float(args.inh_zfrac),

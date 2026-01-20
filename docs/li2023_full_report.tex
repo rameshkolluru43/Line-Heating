@@ -1,0 +1,235 @@
+\documentclass[11pt]{article}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\geometry{margin=1in}
+
+\title{Line-Heating Plate Bending: Governing Equations, Methodology, Test Cases, and Calibrated Parameters}
+\author{Project: Ship\_Plate\_Bending\_LineHeating}
+\date{20 Jan 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report documents the calibrated inherent-strain model used to match the four Li2023 benchmark cases
+(case IDs 1, 6, 87, 90) within the line-heating plate-bending workflow. It summarizes the governing
+thermo-mechanical equations, numerical methodology, test-case definitions, parametric sweeps, and the
+final optimized parameters used in the calibrated runs.
+\end{abstract}
+
+\section{Governing Equations}
+\subsection{Numerical Solution}
+The heat equation is discretized in space using linear tetrahedral finite elements and integrated
+in time with an implicit backward-Euler scheme. At each time step, the Gaussian heat source is
+updated based on the scan position, and the resulting linear system is solved for the temperature
+field. Convection and radiation are applied as boundary flux terms. The mechanical problem is
+solved as a linear thermo-elastic system with an inherent strain field applied in the heating
+band. The thermal history provides temperature-dependent thermal strain, and the displacement
+field is obtained by solving the linear elasticity system for each case after the thermal solve.
+
+\subsection{Heat Transfer}
+The transient heat equation is solved on a 3D plate domain:
+\begin{equation}
+\rho c_p \frac{\partial T}{\partial t} - \nabla \cdot (k \nabla T) = q(\mathbf{x}, t),
+\end{equation}
+where $\rho$ is density, $c_p$ is specific heat, $k$ is thermal conductivity, and $q$ is the applied heat
+source. Temperature-dependent material properties are approximated with linear slopes derived from tabulated
+values.
+
+\subsection{Heat Source}
+A moving Gaussian surface heat flux is applied along the heating line:
+\begin{equation}
+q(r) = q_0 \exp\left(-2\frac{r^2}{r_0^2}\right),
+\end{equation}
+where $r$ is radial distance from the heat centerline and $r_0$ is the Gaussian radius. The peak flux $q_0$
+corresponds to the specified energy per unit length $E_{in}$ and scan speed $v$:
+\begin{equation}
+q_0 = \frac{2 E_{in} v}{\pi r_0^2}.
+\end{equation}
+
+\subsection{Boundary Conditions}
+Convection and radiation are applied on all surfaces:
+\begin{equation}
+- k \nabla T \cdot \mathbf{n} = h_{conv} (T - T_\infty) + \varepsilon \sigma (T^4 - T_\infty^4).
+\end{equation}
+Mechanical boundary conditions use a centerline-fixed support model for the Li2023 cases.
+
+\subsection{Thermo-Mechanical Strain}
+The total strain is decomposed into elastic, thermal, and inherent components:
+\begin{equation}
+\varepsilon = \varepsilon^e + \varepsilon^{th} + \varepsilon^{inh},
+\end{equation}
+with thermal strain $\varepsilon^{th} = \alpha (T - T_0)$ and inherent strain
+$\varepsilon^{inh} = \varepsilon_0 \, \psi(\mathbf{x})$ applied in a band around the heating line.
+
+\section{Problem Description}
+Line heating induces localized thermal expansion, followed by cooling and contraction that leaves
+residual strains and permanent curvature. The objective is to reproduce experimentally observed
+plate deflections for benchmark cases by calibrating an inherent-strain law that maps process
+inputs (energy, passes, thickness) to an effective shrinkage strain applied in a narrow band
+around the heating line. The workflow balances accuracy in single-pass and multi-pass cases over
+both low- and high-energy regimes.
+
+\section{Methodology}
+\subsection{Workflow}
+\begin{enumerate}
+  \item Build a 3D plate mesh with a refined band around the heating line.
+  \item Solve transient heat transfer with a moving Gaussian heat flux.
+  \item Convert thermal history to inherent strain using a calibrated model.
+  \item Solve the mechanical deformation using linear thermo-elasticity with inherent strain.
+  \item Report global deflection and compare to experimental values.
+\end{enumerate}
+
+\subsection{Numerical Settings (Li2023 Runs)}
+\begin{itemize}
+  \item Geometry: $L_x=400$ mm, $L_y=300$ mm; thickness varies per case.
+  \item Heat radius: $r_0=7$ mm; Gaussian exponent $\beta=3$.
+  \item Mesh: $h=20$ mm, $h_{refine}=5$ mm, refine band $=60$ mm.
+  \item Time stepping: $\Delta t=2$ s, extra cooling $=200$ s.
+  \item Boundary: centerline-fixed.
+  \item Inherent band: $\sigma_{inh}=7$ mm, $z_{frac}=0.2$.
+\end{itemize}
+
+\subsection{Mesh Description}
+The mesh is a 3D tetrahedral discretization of the plate, with a locally refined band aligned
+to the heating line. The refined band resolves steep thermal gradients around the moving heat
+source and improves accuracy in the resulting curvature field. A coarser mesh is used away from
+the band to reduce computational cost while preserving global stiffness and boundary effects.
+
+\subsection{Representative Fields}
+When available, the following figures summarize representative fields from the calibrated runs.
+\begin{figure}[h]
+\centering
+\IfFileExists{../results/li2023_case_001_v8_full_four_cases_lowE_single/mesh_3d.png}{
+  \includegraphics[width=0.48\textwidth]{../results/li2023_case_001_v8_full_four_cases_lowE_single/mesh_3d.png}
+  \includegraphics[width=0.48\textwidth]{../results/li2023_case_001_v8_full_four_cases_lowE_single/temperature_top.png}
+}{\fbox{Representative mesh/temperature figures not found.}}
+\caption{Representative mesh (left) and top-surface temperature field (right) for case 1.}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\IfFileExists{../results/li2023_case_001_v8_full_four_cases_lowE_single/deflection_top.png}{
+  \includegraphics[width=0.48\textwidth]{../results/li2023_case_001_v8_full_four_cases_lowE_single/deflection_top.png}
+  \includegraphics[width=0.48\textwidth]{../results/li2023_case_001_v8_full_four_cases_lowE_single/deflection_3d.png}
+}{\fbox{Representative deflection figures not found.}}
+\caption{Representative deflection contours for case 1 (top surface and 3D view).}
+\end{figure}
+
+\section{Test Cases}
+Table~\ref{tab:cases} lists the four benchmark cases.
+\begin{table}[h]
+\centering
+\begin{tabular}{cccccc}
+\toprule
+Case & $v$ (mm/s) & $E_{in}$ (J/mm) & $H$ (mm) & Passes & $w_{exp}$ (mm) \\
+\midrule
+1  & 6  & 600  & 14 & 1 & 5.785 \\
+6  & 11 & 600  & 14 & 2 & 7.712 \\
+87 & 12 & 1000 & 10 & 2 & 13.506 \\
+90 & 15 & 1000 & 10 & 1 & 11.322 \\
+\bottomrule
+\end{tabular}
+\caption{Li2023 benchmark cases used for calibration.}
+\label{tab:cases}
+\end{table}
+
+\section{Parametric Sweeps}
+The following parameters were swept during calibration:
+\begin{itemize}
+  \item Base law exponents: $a$ (energy), $p$ (thickness), and $C$ (scale).
+  \item Pass scaling: $\delta$ (per-pass increment), $k_{energy}$ (high-energy attenuation),
+        $k_{low}$ (low-energy multi-pass attenuation), and $E_{ref,pass}$.
+  \item Single-pass scaling: $k_{single}$ (high-energy single-pass boost).
+  \item Low-energy single-pass boost: $\eta$, $E_0$, and $\Delta_E$.
+\end{itemize}
+Sweeps were evaluated against the four cases, aiming to minimize deflection error while
+preserving good fits in high-energy and multi-pass regimes.
+
+\section{Optimized Parameters}
+Final calibrated parameters (used in the ``final\_calibrated'' tag):
+\begin{align*}
+C &= 0.06, & a &= 0.35, & b &= 0.0, & p &= 0.325, \\
+\delta &= 0.02, & k_{energy} &= 0.43, & k_{low} &= 0.88, & E_{ref,pass} &= 800, \\
+k_{single} &= 0.33, & \eta &= 0.2, & E_0 &= 600, & \Delta_E &= 180.
+\end{align*}
+
+\section{Inherent-Strain Model}
+The inherent strain magnitude $\varepsilon_0$ is computed as:
+\begin{equation}
+\varepsilon_0 = C \left(\frac{E}{E_{ref}}\right)^a \left(\frac{H_{ref}}{H}\right)^p
+\cdot f_{pass} \cdot f_{single} \cdot f_{low,1},
+\end{equation}
+where $f_{pass}$ includes multi-pass scaling with energy attenuation, $f_{single}$ boosts
+high-energy single-pass cases, and $f_{low,1}$ boosts low-energy single-pass cases:
+\begin{align}
+f_{pass} &= \left(1 + (N-1)\delta\right)\,\max\left(0, 1 - k_{energy}(E/E_{ref}-1)\right)\,\max\left(0, 1 - k_{low}(1 - E/E_{ref,pass})\right),\\
+f_{single} &= 1 + k_{single}\max\left(0, E/E_{ref} - 1\right),\\
+f_{low,1} &= 1 + \eta\exp\left(-\left(\frac{E - E_0}{\Delta_E}\right)^2\right)\quad (N=1).
+\end{align}
+
+\section{Results}
+Table~\ref{tab:results} summarizes the final calibrated predictions.
+\begin{table}[h]
+\centering
+\begin{tabular}{ccccc}
+\toprule
+Case & $w_{exp}$ (mm) & $w_{pred}$ (mm) & Error (mm) & $\varepsilon_0$ \\
+\midrule
+1  & 5.785 & 5.888 & +0.103 & 0.0720 \\
+6  & 7.712 & 7.722 & +0.010 & 0.047736 \\
+87 & 13.506 & 13.486 & -0.020 & 0.058235 \\
+90 & 11.322 & 11.319 & -0.003 & 0.097785 \\
+\bottomrule
+\end{tabular}
+\caption{Final calibrated results using the low-energy single-pass boost.}
+\label{tab:results}
+\end{table}
+
+\subsection{Discussion}
+The low-energy single-pass boost corrects underprediction in case 1 without affecting multi-pass
+cases (case 6) or high-energy cases (87, 90). The low-energy multi-pass attenuation ensures that
+case 6 remains close to the experimental target while the high-energy attenuation preserves the
+two-pass behavior for case 87. The resulting fit achieves sub-millimeter error across all four
+benchmark cases.
+
+\section{Reproducibility}
+All run configurations and outputs are stored under the results folder. The latest
+calibrated comparison table is available in
+\texttt{results/li2023\_comparison\_v8\_full\_four\_cases\_lowE\_single.csv}.
+
+\section{Planning and Post-Processing Workflow}
+To transition from calibrated physics to production use, the workflow can be extended with
+an inverse planner and NC post-processing pipeline. The goal is to map a target curvature
+profile to a discrete, machine-executable heating plan.
+
+\subsection{Inverse Planner}
+Define a low-dimensional parameter vector $p$ that encodes heating line positions, pass counts,
+energy per unit length, and scan speeds. Given a desired camber profile $w_{target}(y)$, the
+planner minimizes a misfit:
+\begin{equation}
+J(p) = \int_0^{L_y} \left(w_{sim}(y; p) - w_{target}(y)\right)^2\,dy + \lambda\,\mathcal{P}(p),
+\end{equation}
+where $\mathcal{P}(p)$ penalizes excessive peak temperature, dense line spacing, or long plans.
+The forward map $p \mapsto w_{sim}(y; p)$ is evaluated by the calibrated solver. A derivative-free
+optimizer (e.g., CMA-ES, Nelder--Mead, or Bayesian optimization) is suitable for the first
+implementation.
+
+\subsection{NC Path Generation}
+The planned lines are translated into a machine path in a plate-fixed coordinate system. For each
+line $i$ at $y_i$, the generator produces start/end points, feed rate, and repetition count
+corresponding to the prescribed passes. For a Cartesian gantry, the output can be a G-code program
+with linear moves (G01), feedrate changes (F), and torch on/off commands (M-codes). Cooling or
+dwell times between passes can be inserted to reflect thermal constraints.
+
+\subsection{Validation Loop}
+The resulting NC plan can be re-simulated using the forward model to verify the final curvature
+against the target. This closes the loop between planning, execution, and validation, and allows
+incremental refinement of the plan parameters.
+
+\end{document}

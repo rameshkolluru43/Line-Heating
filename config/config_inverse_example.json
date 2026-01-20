@@ -1,0 +1,80 @@
+{
+  "_comment": "Inverse Problem: Test heating pattern for target curvature",
+  "_use_case": "Given target curvature, optimize line heating pattern on plate",
+  
+  "out": "results/inverse_curvature_optimization",
+  
+  "runner": {
+    "report_only": false,
+    "no_build": false,
+    "no_report": false
+  },
+  
+  "simulation": {
+    "_plate_dimensions": "Target plate specifications",
+    "Lx": 2000,
+    "Ly": 1500,
+    "thickness": 15,
+
+    "_mesh_parameters": "Fine mesh for accurate curvature prediction",
+    "h": 40,
+    "h_refine": 8,
+    "refine_band": 200,
+
+    "_heating_pattern": "Multiple passes for controlled curvature",
+    "heat_y_list": [375, 750, 1125],
+    "heat_mode": "sequential",
+    "pass_gap": 100,
+
+    "_temperature_control": "Allow optimization iterations",
+    "target_Tmax": 950,
+    "target_Tmax_tol": 30,
+    "target_Tmax_iters": 5,
+
+    "_time_stepping": "Longer cooling time for residual effects",
+    "dt": 5,
+    "extra_time": 600,
+
+    "_torch_parameters": "Adjustable process parameters",
+    "r0": 30,
+    "velocity": 12,
+
+    "_cooling": "Include quenching for stronger effect",
+    "h_conv": 5e-5,
+    "quench": true,
+    "quench_h_conv": 8e-3,
+    "quench_T_inf": 293,
+
+    "_boundary_conditions": "Realistic support conditions",
+    "bc": "corner_pins",
+
+    "_inherent_strain": "Tune for target curvature magnitude",
+    "use_inherent": true,
+    "eps0": 0.0025,
+    "inh_sigma": 70,
+    "inh_zfrac": 0.5,
+
+    "_visualization": "Scale for viewing small deformations",
+    "vtk_deform_scale": 5
+  },
+  
+  "_optimization_notes": {
+    "adjust_for_more_curvature": [
+      "Increase eps0 (0.002 -> 0.003)",
+      "Increase target_Tmax (950 -> 1000)",
+      "Decrease velocity (slower = more heat input)",
+      "Add more passes to heat_y_list"
+    ],
+    "adjust_for_less_curvature": [
+      "Decrease eps0 (0.0025 -> 0.002)",
+      "Decrease target_Tmax (950 -> 900)",
+      "Increase velocity (faster = less heat input)",
+      "Remove passes from heat_y_list"
+    ],
+    "adjust_for_uniform_curvature": [
+      "Distribute heat_y_list evenly across plate width",
+      "Use consistent pass_gap between lines",
+      "Ensure symmetric line placement"
+    ]
+  }
+}

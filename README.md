@@ -1,6 +1,18 @@
 # Ship Plate Bending — Line Heating (3D)
 
-This repo contains a 3D coupled thermo-mechanical finite element workflow for ship-plate line heating:
+This repo contains a 3D coupled thermo-mechanical finite element workflow for ship-plate line heating.
+
+## 🎯 Project Purpose
+
+This simulation tool supports two primary use cases:
+
+**A) Forward Problem:** Given line heating at a specified torch temperature (e.g., 900K), predict and validate the resulting curvature profile.
+
+**B) Inverse Problem:** Given a target curvature and plate dimensions, determine the optimal line heating pattern to achieve it.
+
+📖 **See [docs/reference/USE-CASES.md](docs/reference/USE-CASES.md) for detailed workflows and examples**
+
+## ✨ Features
 
 - Gmsh tetrahedral mesh (with refinement around heating line(s))
 - Transient 3D heat diffusion with moving Gaussian surface heat input + convection (optional radiation)
@@ -18,13 +30,13 @@ This repo contains a 3D coupled thermo-mechanical finite element workflow for sh
 
 **macOS / Linux:**
 ```bash
-chmod +x setup.sh
-./setup.sh
+chmod +x setup/setup.sh
+./setup/setup.sh
 ```
 
 **Windows:**
 ```cmd
-setup.bat
+setup\setup.bat
 ```
 
 ### Validate Your Setup
@@ -37,13 +49,60 @@ python3 scripts/validate_setup.py
 
 ```bash
 # 1. Copy example config
-cp run_config.example.json run_config.json
+cp config/run_config.example.json run_config.json
 
 # 2. Run simulation
 python3 scripts/run_anywhere.py --config run_config.json
 ```
 
-📖 **For detailed setup instructions, see [SETUP.md](SETUP.md)**
+**📚 Choose your workflow:**
+- **Forward Problem:** Use [config/config_forward_example.json](config/config_forward_example.json) to validate curvature from 900K torch
+- **Inverse Problem:** Use [config/config_inverse_example.json](config/config_inverse_example.json) to optimize heating pattern
+
+📖 **For detailed workflows, see [docs/reference/QUICK-START-USE-CASES.md](docs/reference/QUICK-START-USE-CASES.md)**
+
+---
+
+## 📦 Standalone executable (no Python install needed)
+
+You can build a native executable on each target OS. The executable still expects the repository to be present (it locates the repo via the current working directory or the `LINEHEATING_REPO` environment variable).
+
+1) Install build dependency:
+
+```bash
+python -m pip install -r requirements-build.txt
+```
+
+2) Build the executable:
+
+```bash
+python scripts/build_executable.py --onefile --name lineheating
+```
+
+3) Run it from the repo root:
+
+```bash
+./dist/lineheating --config run_config.json
+```
+
+Files:
+- Build script: [scripts/build_executable.py](scripts/build_executable.py)
+- Build requirements: [requirements-build.txt](requirements-build.txt)
+
+## 📚 Documentation
+
+### Getting Started
+- **[docs/reference/QUICK-START-USE-CASES.md](docs/reference/QUICK-START-USE-CASES.md)** - Step-by-step guide for both use cases
+- **[docs/reference/USE-CASES.md](docs/reference/USE-CASES.md)** - Detailed theory and examples
+
+### Setup & Installation
+- **[docs/guides/SETUP.md](docs/guides/SETUP.md)** - Installation and setup guide
+- **[docs/guides/OFFLINE-SETUP.md](docs/guides/OFFLINE-SETUP.md)** - Air-gapped/offline installation
+- **[docs/guides/QUICK-REFERENCE.md](docs/guides/QUICK-REFERENCE.md)** - Command reference
+
+### Troubleshooting
+- **[docs/guides/WINDOWS-VS-TROUBLESHOOTING.md](docs/guides/WINDOWS-VS-TROUBLESHOOTING.md)** - Windows compiler issues (detailed)
+- **[docs/guides/WINDOWS-QUICK-FIX.md](docs/guides/WINDOWS-QUICK-FIX.md)** - Windows quick solutions
 
 ---
 
@@ -54,9 +113,9 @@ python3 scripts/run_anywhere.py --config run_config.json
 Required:
 - **Python 3.11 or 3.12** (recommended: 3.11)
 - A C++ compiler (C++17)
-  - Windows: Visual Studio Build Tools
-  - Linux: `gcc/g++`
-  - macOS: Xcode Command Line Tools
+  - **Windows:** Visual Studio Build Tools ([troubleshooting guide](WINDOWS-VS-TROUBLESHOOTING.md))
+  - **Linux:** `gcc/g++`
+  - **macOS:** Xcode Command Line Tools
 - CMake (the runner can also use the Python `cmake` package)
 
 Recommended:
@@ -91,6 +150,25 @@ From the repo root:
 
 ```bash
 python scripts/run_anywhere.py --config run_config.json
+```
+
+## Forward + Inverse Planning (line-heating plans)
+
+Use the planner CLI in [scripts/plan_line_heating.py](scripts/plan_line_heating.py) with a JSON config.
+
+**Forward (plan → curvature):**
+
+- Example config: [config/plan_forward_example.json](config/plan_forward_example.json)
+
+**Inverse (curvature → plan):**
+
+- Example config: [config/plan_example.json](config/plan_example.json)
+
+Run either mode:
+
+```bash
+python3 scripts/plan_line_heating.py --config config/plan_forward_example.json
+python3 scripts/plan_line_heating.py --config config/plan_example.json
 ```
 
 Outputs are written to your configured `out` folder. For safety, if `out` points inside a code folder like `thermo_fem/` or `python_prototype/`, the runner automatically redirects it to `results/<folder_name>`.

@@ -1,0 +1,39 @@
+defaults:
+  - modulus_default
+  - arch: fully_connected
+  - optimizer: adam
+  - scheduler: null
+  - _self_
+
+arch:
+  fully_connected:
+    layer_size: 128
+    nr_layers: 6
+    activation: tanh
+
+optimizer:
+  lr: 1.0e-3
+
+batch_size:
+  interior: 8192
+  boundary: 2048
+  initial: 2048
+
+custom:
+  Lx: 1000.0
+  Ly: 1000.0
+  thickness: 12.0
+  rho: 7.85e-6
+  cp: 500.0
+  k: 0.045
+  E: 210000.0
+  nu: 0.3
+  alpha: 1.2e-5
+  T_ref: 293.0
+  T_inf: 293.0
+  q0: 8.4
+  r0: 25.0
+  v: 10.0
+  heat_y: 500.0
+  t_final: 400.0
+  kappa_th: 1.0

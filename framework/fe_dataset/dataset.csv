@@ -1,0 +1,6 @@
+speed_mm_s,energy_J_per_mm,thickness_mm,passes,deformation_mm,run_name
+10.0,nan,12.0,1,3.9048014908842923,centerline_900C_realistic
+8.0,nan,12.0,1,3.2147940240722113,fe_v8_900C
+10.0,nan,12.0,1,3.2147940240716295,fe_v10_900C
+12.0,nan,12.0,1,3.2147940240721717,fe_v12_900C
+15.0,nan,12.0,1,3.2147940240739312,fe_v15_900C

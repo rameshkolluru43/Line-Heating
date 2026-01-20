@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Line heating deformation dataset",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "speed_mm_s",
+      "energy_J_per_mm",
+      "thickness_mm",
+      "passes",
+      "deformation_mm"
+    ],
+    "properties": {
+      "speed_mm_s": {"type": "number"},
+      "energy_J_per_mm": {"type": "number"},
+      "thickness_mm": {"type": "number"},
+      "passes": {"type": "integer", "minimum": 1},
+      "deformation_mm": {"type": "number"}
+    }
+  }
+}

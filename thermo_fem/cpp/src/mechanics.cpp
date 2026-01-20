@@ -126,6 +126,23 @@ namespace thermo
             D[3][3] = D[4][4] = D[5][5] = mu;
         }
 
+        inline double voigt_dev_norm2(const double s[6])
+        {
+            return s[0] * s[0] + s[1] * s[1] + s[2] * s[2] +
+                   2.0 * (s[3] * s[3] + s[4] * s[4] + s[5] * s[5]);
+        }
+
+        inline void voigt_deviatoric(const double sigma[6], double s[6], double &p_mean)
+        {
+            p_mean = (sigma[0] + sigma[1] + sigma[2]) / 3.0;
+            s[0] = sigma[0] - p_mean;
+            s[1] = sigma[1] - p_mean;
+            s[2] = sigma[2] - p_mean;
+            s[3] = sigma[3];
+            s[4] = sigma[4];
+            s[5] = sigma[5];
+        }
+
     } // namespace
 
     MechanicsAssembly assemble_elasticity_3d(const std::vector<double> &nodes,
@@ -214,6 +231,115 @@ namespace thermo
             }
 
             // Assemble into global matrix
+            const int dof_map[12] = {
+                3 * n0, 3 * n0 + 1, 3 * n0 + 2,
+                3 * n1, 3 * n1 + 1, 3 * n1 + 2,
+                3 * n2, 3 * n2 + 1, 3 * n2 + 2,
+                3 * n3, 3 * n3 + 1, 3 * n3 + 2};
+
+            for (int i = 0; i < 12; ++i)
+            {
+                for (int j = 0; j < 12; ++j)
+                {
+                    asmbl.rows.push_back(dof_map[i]);
+                    asmbl.cols.push_back(dof_map[j]);
+                    asmbl.values.push_back(K_elem[i][j]);
+                }
+            }
+        }
+
+        return asmbl;
+    }
+
+    MechanicsAssembly assemble_elasticity_3d_per_element(const std::vector<double> &nodes,
+                                                         const std::vector<int> &tet,
+                                                         const std::vector<double> &E_elem,
+                                                         const std::vector<double> &nu_elem)
+    {
+        if (nodes.size() % 3 != 0)
+        {
+            throw std::invalid_argument("nodes size must be multiples of 3 (x,y,z triplets)");
+        }
+        const std::size_t n_nodes = nodes.size() / 3;
+        const std::size_t n_dof = 3 * n_nodes;
+
+        if (tet.size() % 4 != 0)
+        {
+            throw std::invalid_argument("tet connectivity must be multiples of 4");
+        }
+        const std::size_t n_elem = tet.size() / 4;
+        if (E_elem.size() != n_elem || nu_elem.size() != n_elem)
+        {
+            throw std::invalid_argument("E_elem/nu_elem size mismatch");
+        }
+
+        MechanicsAssembly asmbl;
+        asmbl.dof_count = n_dof;
+        asmbl.rows.reserve(n_elem * 144);
+        asmbl.cols.reserve(n_elem * 144);
+        asmbl.values.reserve(n_elem * 144);
+
+        for (std::size_t e = 0; e < n_elem; ++e)
+        {
+            const double E = E_elem[e];
+            const double nu = nu_elem[e];
+
+            double D[6][6];
+            compute_D_matrix(E, nu, D);
+
+            const int n0 = tet[4 * e + 0];
+            const int n1 = tet[4 * e + 1];
+            const int n2 = tet[4 * e + 2];
+            const int n3 = tet[4 * e + 3];
+
+            if (n0 < 0 || n1 < 0 || n2 < 0 || n3 < 0 ||
+                static_cast<std::size_t>(n0) >= n_nodes ||
+                static_cast<std::size_t>(n1) >= n_nodes ||
+                static_cast<std::size_t>(n2) >= n_nodes ||
+                static_cast<std::size_t>(n3) >= n_nodes)
+            {
+                throw std::out_of_range("tet node index out of range");
+            }
+
+            const double *p0 = &nodes[3 * n0];
+            const double *p1 = &nodes[3 * n1];
+            const double *p2 = &nodes[3 * n2];
+            const double *p3 = &nodes[3 * n3];
+
+            double volume = 0.0;
+            double grad_N[4][3];
+            tet_geometry(p0, p1, p2, p3, volume, grad_N);
+
+            double B[6][12];
+            compute_B_matrix(grad_N, B);
+
+            double DB[6][12];
+            for (int i = 0; i < 6; ++i)
+            {
+                for (int j = 0; j < 12; ++j)
+                {
+                    DB[i][j] = 0.0;
+                    for (int k = 0; k < 6; ++k)
+                    {
+                        DB[i][j] += D[i][k] * B[k][j];
+                    }
+                }
+            }
+
+            double K_elem[12][12];
+            for (int i = 0; i < 12; ++i)
+            {
+                for (int j = 0; j < 12; ++j)
+                {
+                    K_elem[i][j] = 0.0;
+                    for (int k = 0; k < 6; ++k)
+                    {
+                        K_elem[i][j] += B[k][i] * DB[k][j];
+                    }
+                    K_elem[i][j] *= volume;
+                }
+            }
+
             const int dof_map[12] = {
                 3 * n0, 3 * n0 + 1, 3 * n0 + 2,
                 3 * n1, 3 * n1 + 1, 3 * n1 + 2,
@@ -326,6 +452,101 @@ namespace thermo
         return F_th;
     }
 
+    std::vector<double> thermal_load_3d_per_element(const std::vector<double> &nodes,
+                                                    const std::vector<int> &tet,
+                                                    const std::vector<double> &temperature,
+                                                    const std::vector<double> &E_elem,
+                                                    const std::vector<double> &nu_elem,
+                                                    const std::vector<double> &alpha_elem,
+                                                    double T_ref)
+    {
+        const std::size_t n_nodes = nodes.size() / 3;
+        const std::size_t n_dof = 3 * n_nodes;
+
+        if (temperature.size() != n_nodes)
+        {
+            throw std::invalid_argument("temperature array size mismatch");
+        }
+        if (tet.size() % 4 != 0)
+        {
+            throw std::invalid_argument("tet connectivity must be multiples of 4");
+        }
+        const std::size_t n_elem = tet.size() / 4;
+        if (E_elem.size() != n_elem || nu_elem.size() != n_elem || alpha_elem.size() != n_elem)
+        {
+            throw std::invalid_argument("E/nu/alpha per-element size mismatch");
+        }
+
+        std::vector<double> F_th(n_dof, 0.0);
+
+        for (std::size_t e = 0; e < n_elem; ++e)
+        {
+            const double E = E_elem[e];
+            const double nu = nu_elem[e];
+            const double alpha = alpha_elem[e];
+
+            double D[6][6];
+            compute_D_matrix(E, nu, D);
+
+            const int n0 = tet[4 * e + 0];
+            const int n1 = tet[4 * e + 1];
+            const int n2 = tet[4 * e + 2];
+            const int n3 = tet[4 * e + 3];
+
+            const double *p0 = &nodes[3 * n0];
+            const double *p1 = &nodes[3 * n1];
+            const double *p2 = &nodes[3 * n2];
+            const double *p3 = &nodes[3 * n3];
+
+            double volume = 0.0;
+            double grad_N[4][3];
+            tet_geometry(p0, p1, p2, p3, volume, grad_N);
+
+            double B[6][12];
+            compute_B_matrix(grad_N, B);
+
+            double T_elem = 0.25 * (temperature[n0] + temperature[n1] +
+                                    temperature[n2] + temperature[n3]);
+            double dT = T_elem - T_ref;
+
+            double eps_th[6] = {alpha * dT, alpha * dT, alpha * dT, 0.0, 0.0, 0.0};
+
+            double sigma_th[6];
+            for (int i = 0; i < 6; ++i)
+            {
+                sigma_th[i] = 0.0;
+                for (int j = 0; j < 6; ++j)
+                {
+                    sigma_th[i] += D[i][j] * eps_th[j];
+                }
+            }
+
+            double f_elem[12];
+            for (int i = 0; i < 12; ++i)
+            {
+                f_elem[i] = 0.0;
+                for (int j = 0; j < 6; ++j)
+                {
+                    f_elem[i] += B[j][i] * sigma_th[j];
+                }
+                f_elem[i] *= volume;
+            }
+
+            const int dof_map[12] = {
+                3 * n0, 3 * n0 + 1, 3 * n0 + 2,
+                3 * n1, 3 * n1 + 1, 3 * n1 + 2,
+                3 * n2, 3 * n2 + 1, 3 * n2 + 2,
+                3 * n3, 3 * n3 + 1, 3 * n3 + 2};
+
+            for (int i = 0; i < 12; ++i)
+            {
+                F_th[dof_map[i]] += f_elem[i];
+            }
+        }
+
+        return F_th;
+    }
+
     std::vector<double> thermal_load_3d_with_inherent(const std::vector<double> &nodes,
                                                       const std::vector<int> &tet,
                                                       const std::vector<double> &temperature,
@@ -416,6 +637,378 @@ namespace thermo
         }
 
         return F_th;
+    }
+
+    std::vector<double> thermal_load_3d_with_inherent_per_element(const std::vector<double> &nodes,
+                                                                  const std::vector<int> &tet,
+                                                                  const std::vector<double> &temperature,
+                                                                  const std::vector<double> &eps_inherent,
+                                                                  const std::vector<double> &E_elem,
+                                                                  const std::vector<double> &nu_elem,
+                                                                  const std::vector<double> &alpha_elem,
+                                                                  double T_ref)
+    {
+        const std::size_t n_nodes = nodes.size() / 3;
+        const std::size_t n_dof = 3 * n_nodes;
+
+        if (temperature.size() != n_nodes)
+        {
+            throw std::invalid_argument("temperature array size mismatch");
+        }
+        if (eps_inherent.size() != n_nodes)
+        {
+            throw std::invalid_argument("eps_inherent array size mismatch");
+        }
+        if (tet.size() % 4 != 0)
+        {
+            throw std::invalid_argument("tet connectivity must be multiples of 4");
+        }
+        const std::size_t n_elem = tet.size() / 4;
+        if (E_elem.size() != n_elem || nu_elem.size() != n_elem || alpha_elem.size() != n_elem)
+        {
+            throw std::invalid_argument("E/nu/alpha per-element size mismatch");
+        }
+
+        std::vector<double> F_th(n_dof, 0.0);
+
+        for (std::size_t e = 0; e < n_elem; ++e)
+        {
+            const double E = E_elem[e];
+            const double nu = nu_elem[e];
+            const double alpha = alpha_elem[e];
+
+            double D[6][6];
+            compute_D_matrix(E, nu, D);
+
+            const int n0 = tet[4 * e + 0];
+            const int n1 = tet[4 * e + 1];
+            const int n2 = tet[4 * e + 2];
+            const int n3 = tet[4 * e + 3];
+
+            const double *p0 = &nodes[3 * n0];
+            const double *p1 = &nodes[3 * n1];
+            const double *p2 = &nodes[3 * n2];
+            const double *p3 = &nodes[3 * n3];
+
+            double volume = 0.0;
+            double grad_N[4][3];
+            tet_geometry(p0, p1, p2, p3, volume, grad_N);
+
+            double B[6][12];
+            compute_B_matrix(grad_N, B);
+
+            const double T_elem = 0.25 * (temperature[n0] + temperature[n1] + temperature[n2] + temperature[n3]);
+            const double eps_inh_elem = 0.25 * (eps_inherent[n0] + eps_inherent[n1] + eps_inherent[n2] + eps_inherent[n3]);
+
+            const double dT = T_elem - T_ref;
+            const double eps_iso = alpha * dT + eps_inh_elem;
+
+            double eps_th[6] = {eps_iso, eps_iso, eps_iso, 0.0, 0.0, 0.0};
+
+            double sigma_th[6];
+            for (int i = 0; i < 6; ++i)
+            {
+                sigma_th[i] = 0.0;
+                for (int j = 0; j < 6; ++j)
+                {
+                    sigma_th[i] += D[i][j] * eps_th[j];
+                }
+            }
+
+            double f_elem[12];
+            for (int i = 0; i < 12; ++i)
+            {
+                f_elem[i] = 0.0;
+                for (int j = 0; j < 6; ++j)
+                {
+                    f_elem[i] += B[j][i] * sigma_th[j];
+                }
+                f_elem[i] *= volume;
+            }
+
+            const int dof_map[12] = {
+                3 * n0, 3 * n0 + 1, 3 * n0 + 2,
+                3 * n1, 3 * n1 + 1, 3 * n1 + 2,
+                3 * n2, 3 * n2 + 1, 3 * n2 + 2,
+                3 * n3, 3 * n3 + 1, 3 * n3 + 2};
+
+            for (int i = 0; i < 12; ++i)
+            {
+                F_th[dof_map[i]] += f_elem[i];
+            }
+        }
+
+        return F_th;
+    }
+
+    ElastoplasticAssembly assemble_elastoplastic_3d_step(const std::vector<double> &nodes,
+                                                         const std::vector<int> &tet,
+                                                         const std::vector<double> &displacement,
+                                                         const std::vector<double> &temperature,
+                                                         const std::vector<double> &epsp_prev,
+                                                         const std::vector<double> &epbar_prev,
+                                                         const std::vector<double> &E_elem,
+                                                         const std::vector<double> &nu_elem,
+                                                         const std::vector<double> &alpha_elem,
+                                                         double T_ref,
+                                                         double sigma_y0,
+                                                         double H_iso)
+    {
+        if (nodes.size() % 3 != 0)
+        {
+            throw std::invalid_argument("nodes size must be multiples of 3 (x,y,z triplets)");
+        }
+        const std::size_t n_nodes = nodes.size() / 3;
+        const std::size_t n_dof = 3 * n_nodes;
+
+        if (tet.size() % 4 != 0)
+        {
+            throw std::invalid_argument("tet connectivity must be multiples of 4");
+        }
+        const std::size_t n_elem = tet.size() / 4;
+
+        if (temperature.size() != n_nodes)
+        {
+            throw std::invalid_argument("temperature array size mismatch");
+        }
+        if (displacement.size() != n_dof)
+        {
+            throw std::invalid_argument("displacement array size mismatch");
+        }
+        if (E_elem.size() != n_elem || nu_elem.size() != n_elem || alpha_elem.size() != n_elem)
+        {
+            throw std::invalid_argument("E/nu/alpha per-element size mismatch");
+        }
+
+        std::vector<double> epsp_out(6 * n_elem, 0.0);
+        std::vector<double> epbar_out(n_elem, 0.0);
+        if (!epsp_prev.empty())
+        {
+            if (epsp_prev.size() != 6 * n_elem)
+            {
+                throw std::invalid_argument("epsp_prev size mismatch");
+            }
+            epsp_out = epsp_prev;
+        }
+        if (!epbar_prev.empty())
+        {
+            if (epbar_prev.size() != n_elem)
+            {
+                throw std::invalid_argument("epbar_prev size mismatch");
+            }
+            epbar_out = epbar_prev;
+        }
+
+        MechanicsAssembly Kasm;
+        Kasm.dof_count = n_dof;
+        Kasm.rows.reserve(n_elem * 144);
+        Kasm.cols.reserve(n_elem * 144);
+        Kasm.values.reserve(n_elem * 144);
+
+        std::vector<double> F_int(n_dof, 0.0);
+
+        for (std::size_t e = 0; e < n_elem; ++e)
+        {
+            const double E = E_elem[e];
+            const double nu = nu_elem[e];
+            const double alpha = alpha_elem[e];
+
+            double D[6][6];
+            compute_D_matrix(E, nu, D);
+            const double G = E / (2.0 * (1.0 + nu));
+
+            const int n0 = tet[4 * e + 0];
+            const int n1 = tet[4 * e + 1];
+            const int n2 = tet[4 * e + 2];
+            const int n3 = tet[4 * e + 3];
+
+            if (n0 < 0 || n1 < 0 || n2 < 0 || n3 < 0 ||
+                static_cast<std::size_t>(n0) >= n_nodes ||
+                static_cast<std::size_t>(n1) >= n_nodes ||
+                static_cast<std::size_t>(n2) >= n_nodes ||
+                static_cast<std::size_t>(n3) >= n_nodes)
+            {
+                throw std::out_of_range("tet node index out of range");
+            }
+
+            const double *p0 = &nodes[3 * n0];
+            const double *p1 = &nodes[3 * n1];
+            const double *p2 = &nodes[3 * n2];
+            const double *p3 = &nodes[3 * n3];
+
+            double volume = 0.0;
+            double grad_N[4][3];
+            tet_geometry(p0, p1, p2, p3, volume, grad_N);
+
+            double B[6][12];
+            compute_B_matrix(grad_N, B);
+
+            const int dof_map[12] = {
+                3 * n0, 3 * n0 + 1, 3 * n0 + 2,
+                3 * n1, 3 * n1 + 1, 3 * n1 + 2,
+                3 * n2, 3 * n2 + 1, 3 * n2 + 2,
+                3 * n3, 3 * n3 + 1, 3 * n3 + 2};
+
+            double u_elem[12];
+            for (int i = 0; i < 12; ++i)
+            {
+                u_elem[i] = displacement[dof_map[i]];
+            }
+
+            double eps_total[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            for (int i = 0; i < 6; ++i)
+            {
+                for (int j = 0; j < 12; ++j)
+                {
+                    eps_total[i] += B[i][j] * u_elem[j];
+                }
+            }
+
+            const double T_elem = 0.25 * (temperature[n0] + temperature[n1] + temperature[n2] + temperature[n3]);
+            const double dT = T_elem - T_ref;
+            double eps_th[6] = {alpha * dT, alpha * dT, alpha * dT, 0.0, 0.0, 0.0};
+
+            double epsp_old[6];
+            for (int i = 0; i < 6; ++i)
+            {
+                epsp_old[i] = epsp_out[6 * e + i];
+            }
+
+            double eps_e_tr[6];
+            for (int i = 0; i < 6; ++i)
+            {
+                eps_e_tr[i] = eps_total[i] - eps_th[i] - epsp_old[i];
+            }
+
+            double sigma_tr[6] = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            for (int i = 0; i < 6; ++i)
+            {
+                for (int j = 0; j < 6; ++j)
+                {
+                    sigma_tr[i] += D[i][j] * eps_e_tr[j];
+                }
+            }
+
+            double s_tr[6];
+            double p_mean = 0.0;
+            voigt_deviatoric(sigma_tr, s_tr, p_mean);
+
+            const double s_norm2 = voigt_dev_norm2(s_tr);
+            const double s_eq = std::sqrt(1.5 * s_norm2);
+            const double sig_y = sigma_y0 + H_iso * epbar_out[e];
+
+            double sigma[6];
+            double D_tan[6][6];
+            if (s_eq <= sig_y || s_eq < 1e-12)
+            {
+                for (int i = 0; i < 6; ++i)
+                {
+                    sigma[i] = sigma_tr[i];
+                }
+                for (int i = 0; i < 6; ++i)
+                {
+                    for (int j = 0; j < 6; ++j)
+                    {
+                        D_tan[i][j] = D[i][j];
+                    }
+                }
+            }
+            else
+            {
+                const double delta_lambda = (s_eq - sig_y) / (3.0 * G + H_iso);
+                const double scale = 1.0 - (3.0 * G * delta_lambda) / s_eq;
+                for (int i = 0; i < 6; ++i)
+                {
+                    sigma[i] = scale * s_tr[i];
+                }
+                sigma[0] += p_mean;
+                sigma[1] += p_mean;
+                sigma[2] += p_mean;
+
+                for (int i = 0; i < 6; ++i)
+                {
+                    const double depsp = delta_lambda * 1.5 * s_tr[i] / s_eq;
+                    epsp_out[6 * e + i] = epsp_old[i] + depsp;
+                }
+                epbar_out[e] += delta_lambda;
+
+                // Consistent tangent: C_ep = C - (2G)^2/(3G+H) * (n ⊗ n)
+                double n_dir[6];
+                const double inv_s_eq = 1.0 / s_eq;
+                for (int i = 0; i < 6; ++i)
+                {
+                    n_dir[i] = 1.5 * s_tr[i] * inv_s_eq;
+                }
+
+                const double coeff = (2.0 * G) * (2.0 * G) / (3.0 * G + H_iso);
+                for (int i = 0; i < 6; ++i)
+                {
+                    for (int j = 0; j < 6; ++j)
+                    {
+                        D_tan[i][j] = D[i][j] - coeff * n_dir[i] * n_dir[j];
+                    }
+                }
+            }
+
+            double f_elem[12];
+            for (int i = 0; i < 12; ++i)
+            {
+                f_elem[i] = 0.0;
+                for (int j = 0; j < 6; ++j)
+                {
+                    f_elem[i] += B[j][i] * sigma[j];
+                }
+                f_elem[i] *= volume;
+            }
+            for (int i = 0; i < 12; ++i)
+            {
+                F_int[dof_map[i]] += f_elem[i];
+            }
+
+            double DB[6][12];
+            for (int i = 0; i < 6; ++i)
+            {
+                for (int j = 0; j < 12; ++j)
+                {
+                    DB[i][j] = 0.0;
+                    for (int k = 0; k < 6; ++k)
+                    {
+                        DB[i][j] += D_tan[i][k] * B[k][j];
+                    }
+                }
+            }
+
+            double K_elem[12][12];
+            for (int i = 0; i < 12; ++i)
+            {
+                for (int j = 0; j < 12; ++j)
+                {
+                    K_elem[i][j] = 0.0;
+                    for (int k = 0; k < 6; ++k)
+                    {
+                        K_elem[i][j] += B[k][i] * DB[k][j];
+                    }
+                    K_elem[i][j] *= volume;
+                }
+            }
+
+            for (int i = 0; i < 12; ++i)
+            {
+                for (int j = 0; j < 12; ++j)
+                {
+                    Kasm.rows.push_back(dof_map[i]);
+                    Kasm.cols.push_back(dof_map[j]);
+                    Kasm.values.push_back(K_elem[i][j]);
+                }
+            }
+        }
+
+        ElastoplasticAssembly out;
+        out.stiffness = Kasm;
+        out.internal_force = F_int;
+        out.epsp = epsp_out;
+        out.epbar = epbar_out;
+        return out;
     }
 
 } // namespace thermo

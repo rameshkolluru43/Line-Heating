@@ -1,0 +1,5 @@
+case_id,velocity_mm_s,energy_J_mm,thickness_mm,passes,w_exp_mm,w_pred_mm,error_mm,eps0,T_peak_K,eps0_model
+1,6.0,600.0,14.0,1,5.785,5.887546799372953,0.10254679937295297,0.072,1173.586259317832,"C=0.06,a=0.35,b=0.0,p=0.325,delta=0.02,k_energy=0.43,k_low=0.88,e_ref_pass=800.0,k_single=0.33,eta_low_single=0.2,e0_low_single=600.0,de_low_single=180.0"
+6,11.0,600.0,14.0,2,7.712,7.722041107461224,0.010041107461224108,0.047736,1176.900187977216,"C=0.06,a=0.35,b=0.0,p=0.325,delta=0.02,k_energy=0.43,k_low=0.88,e_ref_pass=800.0,k_single=0.33,eta_low_single=0.2,e0_low_single=600.0,de_low_single=180.0"
+87,12.0,1000.0,10.0,2,13.506,13.485618139060563,-0.0203818609394375,0.05823480354743023,1388.4762579880462,"C=0.06,a=0.35,b=0.0,p=0.325,delta=0.02,k_energy=0.43,k_low=0.88,e_ref_pass=800.0,k_single=0.33,eta_low_single=0.2,e0_low_single=600.0,de_low_single=180.0"
+90,15.0,1000.0,10.0,1,11.322,11.318788539485984,-0.0032114605140147745,0.09778490650000134,1376.4543284958845,"C=0.06,a=0.35,b=0.0,p=0.325,delta=0.02,k_energy=0.43,k_low=0.88,e_ref_pass=800.0,k_single=0.33,eta_low_single=0.2,e0_low_single=600.0,de_low_single=180.0"

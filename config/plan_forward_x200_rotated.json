@@ -1,0 +1,71 @@
+{
+  "plate": {
+    "Lx": 300.0,
+    "Ly": 400.0,
+    "thickness": 14.0
+  },
+  "plan": {
+    "lines": [
+      {
+        "y_mm": 200.0,
+        "x_start_mm": 0.0,
+        "x_end_mm": 300.0,
+        "energy_J_mm": 600.0,
+        "velocity_mm_s": 6.0,
+        "passes": 1,
+        "sequence": "sequential"
+      }
+    ]
+  },
+  "solver": {
+    "use_solver": true,
+    "r0": 7.0,
+    "gaussian_beta": 3.0,
+    "dt": 2.0,
+    "extra_time": 200.0,
+    "heat_mode": "sequential",
+    "pass_gap": 0.0,
+    "h": 20.0,
+    "h_refine": 5.0,
+    "refine_band": 60.0,
+    "h_conv": 5e-5,
+    "emissivity": 0.8,
+    "T_inf": 293.15,
+    "T_ref": 293.15,
+    "E": 205000.0,
+    "nu": 0.28,
+    "alpha": 1.1e-5,
+    "bc": "centerline_fixed",
+    "use_inherent": true,
+    "eps0_model": {
+      "C": 0.06,
+      "a": 0.35,
+      "b": 0.0,
+      "p": 0.325,
+      "delta": 0.02,
+      "k_energy": 0.43,
+      "k_low": 0.88,
+      "e_ref_pass": 800.0,
+      "k_single": 0.33,
+      "eta_low_single": 0.2,
+      "e0_low_single": 600.0,
+      "de_low_single": 180.0
+    },
+    "inh_sigma": 7.0,
+    "inh_zfrac": 0.2,
+    "vtk_deform_scale": 50.0,
+    "target_Tmax_from_energy": true,
+    "target_Tmax_model": {
+      "E_min": 600.0,
+      "E_max": 1000.0,
+      "T_min_C": 900.0,
+      "T_max_C": 1100.0
+    }
+  },
+  "output": {
+    "root": "results/plans",
+    "run_tag": "forward_li2023_case1_x200_rotated",
+    "final_report": true,
+    "no_build": true
+  }
+}

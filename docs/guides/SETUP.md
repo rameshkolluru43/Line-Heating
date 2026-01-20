@@ -8,17 +8,17 @@ This project is designed to run seamlessly on **macOS**, **Windows**, and **Linu
 
 ```bash
 # Make setup script executable
-chmod +x setup.sh
+chmod +x setup/setup.sh
 
 # Run setup
-./setup.sh
+./setup/setup.sh
 ```
 
 ### Windows
 
 ```cmd
 REM Run setup
-setup.bat
+setup\setup.bat
 ```
 
 The setup scripts will:

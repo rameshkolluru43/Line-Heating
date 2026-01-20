@@ -31,7 +31,40 @@ import shutil
 import subprocess
 import sys
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+
+def _looks_like_repo(path: Path) -> bool:
+    return (
+        (path / "requirements.txt").exists()
+        and (path / "thermo_fem").is_dir()
+        and (path / "scripts").is_dir()
+    )
+
+
+def _resolve_repo_root() -> Path:
+    env_root = os.environ.get("LINEHEATING_REPO")
+    if env_root:
+        env_path = Path(env_root).expanduser().resolve()
+        if _looks_like_repo(env_path):
+            return env_path
+
+    cwd = Path.cwd().resolve()
+    if _looks_like_repo(cwd):
+        return cwd
+
+    exe_dir = Path(sys.executable).resolve().parent
+    if _looks_like_repo(exe_dir):
+        return exe_dir
+
+    file_root = Path(__file__).resolve().parents[1]
+    if _looks_like_repo(file_root):
+        return file_root
+
+    raise SystemExit(
+        "Could not locate repository root. Run from the repo directory or set LINEHEATING_REPO."
+    )
+
+
+REPO_ROOT = _resolve_repo_root()
 VENV_DIR = REPO_ROOT / ".venv_lineheating"
 REQUIREMENTS = REPO_ROOT / "requirements.txt"
 RESULTS_ROOT = REPO_ROOT / "results"
@@ -118,8 +151,15 @@ def _to_cli_args(sim_cfg: dict) -> list[str]:
         if isinstance(value, (list, tuple)):
             if len(value) == 0:
                 continue
-            # Special-case common lists: heat_y_list, etc.
-            args.extend([flag, ",".join(str(v) for v in value)])
+            if any(isinstance(v, (dict, list, tuple)) for v in value):
+                args.extend([flag, json.dumps(value)])
+            else:
+                # Special-case common lists: heat_y_list, etc.
+                args.extend([flag, ",".join(str(v) for v in value)])
+            continue
+
+        if isinstance(value, dict):
+            args.extend([flag, json.dumps(value)])
             continue
 
         args.extend([flag, str(value)])
@@ -138,6 +178,24 @@ def _capture(cmd: list[str], *, cwd: Path | None, env: dict[str, str] | None, lo
         rc = p.wait()
     if rc != 0:
         raise subprocess.CalledProcessError(rc, cmd)
+
+
+def _venv_env(venv_dir: Path) -> dict[str, str]:
+    """Return a clean environment for venv execution.
+
+    This removes user/global Python path injections that can cause the venv
+    to pick up system site-packages (e.g., PYTHONPATH). It also ensures the
+    venv bin directory is first on PATH.
+    """
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONUSERBASE", None)
+    env["PYTHONNOUSERSITE"] = "1"
+    vbin = str(_venv_python(venv_dir).parent)
+    env["VIRTUAL_ENV"] = str(venv_dir)
+    env["PATH"] = vbin + os.pathsep + env.get("PATH", "")
+    return env
 
 
 def _venv_python(venv_dir: Path) -> Path:
@@ -175,8 +233,9 @@ def _install_python_deps(venv_dir: Path) -> None:
         raise SystemExit(f"Missing requirements file: {REQUIREMENTS}")
 
     print("[run_anywhere] Installing Python deps...")
-    _run(_venv_pip(venv_dir) + ["install", "--upgrade", "pip", "setuptools", "wheel"])
-    _run(_venv_pip(venv_dir) + ["install", "-r", str(REQUIREMENTS)])
+    env = _venv_env(venv_dir)
+    _run(_venv_pip(venv_dir) + ["install", "--upgrade", "pip", "setuptools", "wheel"], env=env)
+    _run(_venv_pip(venv_dir) + ["install", "-r", str(REQUIREMENTS)], env=env)
 
 
 def _check_gmsh(venv_dir: Path) -> None:
@@ -185,7 +244,7 @@ def _check_gmsh(venv_dir: Path) -> None:
 
     # Ensure the Python bindings import.
     try:
-        subprocess.check_call([str(vpy), "-c", "import gmsh; print(gmsh.__version__)"])
+        subprocess.check_call([str(vpy), "-c", "import gmsh; print(gmsh.__version__)"], env=_venv_env(venv_dir))
     except Exception as exc:
         raise SystemExit(
             "Failed to import the Python 'gmsh' package inside the venv. "
@@ -213,7 +272,7 @@ def _pybind11_cmake_dir(venv_python: Path) -> str:
         "p = pathlib.Path(pybind11.get_cmake_dir()); "
         "print(str(p))"
     )
-    out = subprocess.check_output([str(venv_python), "-c", code], text=True).strip()
+    out = subprocess.check_output([str(venv_python), "-c", code], text=True, env=_venv_env(venv_python.parent.parent)).strip()
     if not out:
         raise RuntimeError("Failed to locate pybind11 CMake dir")
     return out
@@ -228,7 +287,7 @@ def _build_cpp_extension(venv_dir: Path) -> None:
     if cmake_exe is None:
         # Try module form: python -m cmake
         try:
-            subprocess.check_call([str(vpy), "-m", "cmake", "--version"], stdout=subprocess.DEVNULL)
+            subprocess.check_call([str(vpy), "-m", "cmake", "--version"], stdout=subprocess.DEVNULL, env=_venv_env(venv_dir))
             cmake_cmd = [str(vpy), "-m", "cmake"]
         except Exception as exc:
             raise SystemExit(
@@ -258,11 +317,11 @@ def _build_cpp_extension(venv_dir: Path) -> None:
             f"-DPython3_EXECUTABLE={vpy_str}",
         ],
         cwd=REPO_ROOT,
-        env=os.environ.copy(),
+        env=_venv_env(venv_dir),
     )
 
     # Multi-config generators (Visual Studio) need --config.
-    _run(cmake_cmd + ["--build", str(build_dir), "--config", cfg, "-j"], cwd=REPO_ROOT, env=os.environ.copy())
+    _run(cmake_cmd + ["--build", str(build_dir), "--config", cfg, "-j"], cwd=REPO_ROOT, env=_venv_env(venv_dir))
 
 
 def _run_simulation(venv_dir: Path, out_dir: Path, sim_args: list[str]) -> None:
@@ -280,7 +339,7 @@ def _run_simulation(venv_dir: Path, out_dir: Path, sim_args: list[str]) -> None:
     cmd = [str(vpy), str(sim)] + sim_args
 
     print(f"[run_anywhere] Running simulation -> {out_dir}")
-    _capture(cmd, cwd=REPO_ROOT / "thermo_fem" / "python", env=os.environ.copy(), log_path=log_path)
+    _capture(cmd, cwd=REPO_ROOT / "thermo_fem" / "python", env=_venv_env(venv_dir), log_path=log_path)
 
 
 def _make_report(venv_dir: Path, out_dir: Path) -> tuple[Path, Path | None]:
@@ -289,7 +348,7 @@ def _make_report(venv_dir: Path, out_dir: Path) -> tuple[Path, Path | None]:
     cmd = [str(vpy), str(report_tool), "--out", str(out_dir)]
 
     print("[run_anywhere] Generating LaTeX report...")
-    _run(cmd, cwd=REPO_ROOT, env=os.environ.copy())
+    _run(cmd, cwd=REPO_ROOT, env=_venv_env(venv_dir))
 
     tex_path = out_dir / "report.tex"
     pdf_path = out_dir / "report.pdf"
