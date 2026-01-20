@@ -12,7 +12,7 @@ This project simulates **line heating** for ship plate bending using 3D coupled 
 - Plate dimensions (`Lx`, `Ly`, `thickness`)
 - Torch temperature (`target_Tmax`: 900K)
 - Heating parameters (velocity, torch radius, etc.)
-- Heating line positions (`heat_y_list`)
+- Heating line positions (`heat_y_list`) or arbitrary segments (`heat_lines`)
 
 ### What You Get:
 - Temperature distribution over time
@@ -23,6 +23,8 @@ This project simulates **line heating** for ship plate bending using 3D coupled 
 
 ### Example Configuration:
 
+**Option A: Parallel lines (heat_y_list)**
+
 ```json
 {
   "out": "results/forward_validation",
@@ -30,17 +32,37 @@ This project simulates **line heating** for ship plate bending using 3D coupled 
     "Lx": 1000,
     "Ly": 1000,
     "thickness": 12,
-    
     "heat_y_list": [250, 500, 750],
     "target_Tmax": 900,
     "target_Tmax_tol": 20,
-    
     "velocity": 10,
     "r0": 25,
-    
     "use_inherent": true,
     "eps0": 0.002,
-    
+    "vtk_deform_scale": 1
+  }
+}
+```
+
+**Option B: Arbitrary lines (heat_lines)**
+
+```json
+{
+  "out": "results/forward_validation",
+  "simulation": {
+    "Lx": 1000,
+    "Ly": 1000,
+    "thickness": 12,
+    "heat_lines": [
+      {"x0": 0, "y0": 500, "x1": 1000, "y1": 500},
+      {"x0": 500, "y0": 0, "x1": 500, "y1": 1000}
+    ],
+    "target_Tmax": 900,
+    "target_Tmax_tol": 20,
+    "velocity": 10,
+    "r0": 25,
+    "use_inherent": true,
+    "eps0": 0.002,
     "vtk_deform_scale": 1
   }
 }

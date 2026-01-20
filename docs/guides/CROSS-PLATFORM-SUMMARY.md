@@ -315,6 +315,9 @@ chmod +x scripts/validate_setup.py
     "Ly": 1000,
     "thickness": 12,
     "heat_y_list": [250, 500, 750],
+    "heat_lines": [
+      {"x0": 0, "y0": 500, "x1": 1000, "y1": 500}
+    ],
     "use_inherent": true
   }
 }

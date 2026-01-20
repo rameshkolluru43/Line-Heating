@@ -267,9 +267,9 @@ Everything is written under the configured `out` folder, including:
 
 ## 📚 Documentation
 
-- **[SETUP.md](SETUP.md)** - Detailed setup instructions for each platform
-- **[PLATFORM-INDEPENDENT.md](PLATFORM-INDEPENDENT.md)** - How cross-platform support works
-- **[QUICK-REFERENCE.md](QUICK-REFERENCE.md)** - Command cheat sheet for all platforms
+- **[docs/guides/SETUP.md](docs/guides/SETUP.md)** - Detailed setup instructions for each platform
+- **[docs/guides/PLATFORM-INDEPENDENT.md](docs/guides/PLATFORM-INDEPENDENT.md)** - How cross-platform support works
+- **[docs/guides/QUICK-REFERENCE.md](docs/guides/QUICK-REFERENCE.md)** - Command cheat sheet for all platforms
 - **[README.md](README.md)** - This file (project overview)
 
 ---
@@ -291,6 +291,7 @@ A few common ones:
 - Heating lines:
   - Single: `heat_y`
   - Multiple: `heat_y_list: [250, 500, 750]`
+  - Arbitrary orientation: `heat_lines` with segments like `{x0,y0,x1,y1}`
 - Multi-pass scheduling:
   - `heat_mode: "simultaneous" | "sequential"`
   - `pass_gap` (seconds between sequential passes)

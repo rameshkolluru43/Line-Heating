@@ -21,7 +21,10 @@
      "Lx": 1000,           // Plate length (mm)
      "Ly": 1000,           // Plate width (mm)
      "thickness": 12,      // Plate thickness (mm)
-     "heat_y_list": [500], // Line position (centerline)
+      "heat_y_list": [500], // Line position (centerline)
+      "heat_lines": [        // Optional alternative to heat_y_list
+         {"x0": 0, "y0": 500, "x1": 1000, "y1": 500}
+      ],
      "target_Tmax": 900,   // Torch temperature (K)
      "velocity": 10        // Torch speed (mm/s)
    }

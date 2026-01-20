@@ -69,7 +69,10 @@ All config files follow this structure:
     "Lx": 1000,           // Plate length (mm)
     "Ly": 1000,           // Plate width (mm)
     "thickness": 12,      // Plate thickness (mm)
-    "heat_y_list": [500], // Heating line positions
+    "heat_y_list": [500], // Heating line positions (parallel to x)
+    "heat_lines": [        // Optional: arbitrary line segments
+      {"x0": 0, "y0": 500, "x1": 1000, "y1": 500}
+    ],
     "target_Tmax": 900,   // Target torch temperature (K)
     "velocity": 10,       // Torch speed (mm/s)
     // ... more parameters
@@ -86,7 +89,8 @@ All config files follow this structure:
 - `thickness` - Plate thickness (mm)
 
 ### Heating Configuration
-- `heat_y_list` - Y-coordinates of heating lines (mm)
+- `heat_y_list` - Y-coordinates of heating lines (mm) for lines parallel to x
+- `heat_lines` - Arbitrary line segments, each `{x0,y0,x1,y1}` (mm)
 - `heat_mode` - `"sequential"` or `"simultaneous"`
 - `pass_gap` - Time between passes (seconds)
 
