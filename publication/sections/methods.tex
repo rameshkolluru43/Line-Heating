@@ -1,0 +1,40 @@
+\section{Methods}
+\label{sec:methods}
+
+\subsection{Notation and Units}
+All quantities use consistent units: length \si{mm}, time \si{s}, temperature \si{K}, stress \si{MPa}. Key symbols: $T$ (temperature), $\rho$, $c_p$, $k$ (density, specific heat, conductivity), $h_{\mathrm{conv}}$ (convection coefficient), $\vect{u}$ (displacement), $\tensor{D}$ (elastic stiffness), $\alpha$ (thermal expansion), $\boldsymbol{\varepsilon}^{\mathrm{th}}$ (thermal strain), $\boldsymbol{\varepsilon}^{\mathrm{inh}}$ (inherent strain surrogate).
+
+\subsection{Geometry and Heating Plan}
+Plate geometry is defined by length $L_x$, width $L_y$, and thickness $t$. For the keel-plate demonstrations, a representative section of \SI{3000}{mm} $\times$ \SI{1000}{mm} $\times$ \SI{49}{mm} is used. Heating plans specify centerlines (e.g.\ $y = \mathrm{const}$ or arbitrary segments), torch speed $v$, energy per unit length $E$, effective Gaussian radius $r_0$, pass count, and scheduling (sequential or simultaneous multi-line).
+
+\subsection{Governing Equations}
+
+\subsubsection{Heat Conduction}
+Transient 3D heat conduction with temperature-dependent $k(T)$, $c_p(T)$:
+\begin{align}
+\rho c_p(T) \frac{\partial T}{\partial t} &= \nabla \cdot \bigl(k(T) \nabla T\bigr) + Q(\mathbf{x},t), \\
+\mathbf{n}\cdot \bigl(k\nabla T\bigr) &= h_{\mathrm{conv}}\,(T - T_{\infty}) + \varepsilon\sigma\,(T^4 - T_{\infty}^4)\quad \text{(boundaries)}.
+\end{align}
+The moving torch is applied as a surface flux. Convection and (optionally) radiation are Robin-type boundary terms. The nominal Gaussian flux is
+\begin{equation}
+q(r,t) = q_0 \exp\left(-\beta \frac{r^2}{r_0^2}\right),\quad r^2 = (x-x_s(t))^2 + (y-y_{\mathrm{line}})^2.
+\end{equation}
+
+\subsubsection{Mechanical Equilibrium}
+Linear thermoelasticity with optional inherent strain:
+\begin{align}
+\nabla \cdot \boldsymbol{\sigma} &= \mathbf{0}, \\
+\boldsymbol{\sigma} &= \mathbf{D}(T):\bigl(\boldsymbol{\varepsilon}-\boldsymbol{\varepsilon}^{\mathrm{th}}-\boldsymbol{\varepsilon}^{\mathrm{inh}}\bigr), \\
+\boldsymbol{\varepsilon}^{\mathrm{th}} &= \alpha(T)\,\bigl(T - T_{\mathrm{ref}}\bigr)\,\mathbf{I}.
+\end{align}
+The inherent-strain term $\boldsymbol{\varepsilon}^{\mathrm{inh}}$ is a surrogate for inelastic effects to approximate residual bending after cooldown; it is parameterized by amplitude and spatial support (band width and depth fraction) and calibrated to match benchmark deflection data.
+
+\subsection{Numerical Discretization}
+Spatial discretization uses linear tetrahedral elements (tet4). Thermal: semi-discrete form $\mathbf{M}\,\dot{\mathbf{T}} + \mathbf{K}\,\mathbf{T} = \mathbf{f}$ with backward Euler:
+\begin{equation}
+\bigl(\mathbf{M} + \Delta t\,\mathbf{K}\bigr)\,\mathbf{T}^{n+1} = \mathbf{M}\,\mathbf{T}^{n} + \Delta t\,\mathbf{f}^{n+1}.
+\end{equation}
+Mechanical: $\mathbf{K}_u\,\mathbf{u} = \mathbf{f}_{\mathrm{th}} + \mathbf{f}_{\mathrm{inh}}$ with stiffness from tet4 strain-displacement matrices and thermal/inherent load vectors.
+
+\subsection{Software Implementation}
+The core solver is implemented in C++ (pybind11) and driven by Python: mesh generation (Gmsh), thermal solve, mechanical solve, and output of VTK, summary JSON, and PNG plots. See \cref{sec:repro} for run commands.

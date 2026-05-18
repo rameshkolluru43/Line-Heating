@@ -1,0 +1,16 @@
+\section{Discussion}
+\label{sec:discussion}
+
+The Li2023 validation shows that the 3D thermo-mechanical workflow, combined with the calibrated inherent-strain surrogate, reproduces midspan residual deflection to within \SI{2}{\%} for the four benchmark conditions. Errors do not show a strong monotonic trend with speed, thickness, or energy in this small set; a broader parameter sweep would be needed for sensitivity analysis.
+
+For the keel-plate demonstrations, deflection amplitude increases with heating intensity and pass count. The Li2023-scaled sequential case achieves substantial deflection with higher peak temperature and longer process time. Some early runs use mixed temperature units; a thermal-unit audit is planned.
+
+\paragraph{Limitations}
+\begin{itemize}
+  \item Residual deformation is approximated via inherent strain rather than full elastoplastic integration; the surrogate is calibrated to Li2023 and may need recalibration for other geometries or processes.
+  \item Time-series validation (temperature and deflection histories during heating and cooling) is not yet reported; comparison with such data would strengthen validation.
+  \item Mesh and time-step convergence studies and energy-balance checks are recommended for publication-grade numerical verification.
+\end{itemize}
+
+\paragraph{Strengths}
+The workflow is reproducible, supports both forward and inverse use cases, and produces VTK, JSON, and plots suitable for reporting. The C++/Python implementation allows iterative calibration and batch runs across multiple cases.

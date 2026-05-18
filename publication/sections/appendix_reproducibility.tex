@@ -1,0 +1,25 @@
+\section{Reproducibility: Key Commands}
+\label{sec:repro}
+
+Build the C++ extension and run simulations from the repository root. Example commands:
+
+\begin{verbatim}
+# Validate setup
+python3 scripts/validate_setup.py
+
+# Run Li2023 validation cases (e.g. v8 four cases)
+python scripts/run_li2023_cases.py  # (use config that points to v8)
+
+# Keel-plate cases
+python scripts/cases/run_keel_fast_parallel.py
+python scripts/cases/run_keel_calibrated.py
+python scripts/cases/run_keel_enhanced.py
+python scripts/cases/run_keel_li2023_scaled.py --run
+\end{verbatim}
+
+To build this manuscript from the \repoPath{publication/} directory:
+\begin{verbatim}
+cd publication
+latexmk -pdf main.tex
+\end{verbatim}
+Or: \texttt{pdflatex main.tex}, then \texttt{bibtex main}, then \texttt{pdflatex main.tex} twice. Figures are read from \repoPath{../results/...}; ensure the corresponding simulation outputs exist in \repoPath{results/}.

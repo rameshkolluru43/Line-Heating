@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 # Plate dimensions (mm)
 Lx = 1000  # Length
 Ly = 1000  # Width  
@@ -126,7 +128,7 @@ ax3.grid(True, alpha=0.3)
 plt.tight_layout()
 
 # Save figure
-repo_root = Path(__file__).resolve().parent
+repo_root = REPO_ROOT
 results_dir = repo_root / "results"
 results_dir.mkdir(parents=True, exist_ok=True)
 output_file = results_dir / "centerline_900C_deflection.png"
@@ -169,7 +171,7 @@ print("SIMULATION COMPLETE")
 print("="*60)
 print("\nNOTE: This is a simplified analytical model.")
 print("For full 3D FEM simulation, use the main solver:")
-print("  python3 scripts/run_anywhere.py --config run_centerline_900C.json")
+print("  python3 scripts/run_anywhere.py --config config/runs/run_centerline_900C.json")
 print("="*60)
 
 plt.show()

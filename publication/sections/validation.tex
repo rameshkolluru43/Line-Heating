@@ -1,0 +1,59 @@
+\section{Validation}
+\label{sec:validation}
+
+\subsection{Li et al.\ (2023) Benchmark Cases}
+Validation is performed against four experimental cases from Li et al.\ \cite{li2023} (midspan residual deflection). The inherent-strain surrogate was calibrated to match these conditions; the same parameters are used for all four cases. \Cref{tab:li2023} summarizes predicted vs.\ experimental deflection and peak temperature.
+
+\begin{table}[H]
+\centering
+\caption{Li et al.\ (2023) validation: predicted vs.\ experimental midspan residual deflection (v8 calibrated runs).}
+\label{tab:li2023}
+\begin{tabular}{rrrrrrrrr}
+\toprule
+Case & $v$ (mm/s) & $E$ (J/mm) & $t$ (mm) & $w_{\mathrm{exp}}$ (mm) & $w_{\mathrm{pred}}$ (mm) & $\Delta w$ (mm) & $\Delta w/w_{\mathrm{exp}}$ (\%) & $T_{\mathrm{peak}}$ (K) \\
+\midrule
+1   & 6.0  & 600  & 14 & 5.785 & 5.888 &  0.103 &  1.77 & 1173.6 \\
+6   & 11.0 & 600  & 14 & 7.712 & 7.722 &  0.010 &  0.13 & 1176.9 \\
+87  & 12.0 & 1000 & 10 & 13.506 & 13.486 & -0.020 & -0.15 & 1388.5 \\
+90  & 15.0 & 1000 & 10 & 11.322 & 11.319 & -0.003 & -0.03 & 1376.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Mean absolute error in deflection is \SI{0.034}{mm}; mean absolute percentage error is \SI{0.52}{\%}; maximum absolute percentage error is \SI{1.77}{\%} (Case~1). \Cref{fig:li2023-t,fig:li2023-w} show representative temperature and deflection fields for Case~90.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\linewidth]{../results/li2023_case_090_v8_full_four_cases_lowE_single/temperature_top.png}
+\caption{Li2023 Case~90: temperature field (top view) at peak temperature time.}
+\label{fig:li2023-t}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\linewidth]{../results/li2023_case_090_v8_full_four_cases_lowE_single/deflection_top.png}
+\caption{Li2023 Case~90: residual deflection field (top view).}
+\label{fig:li2023-w}
+\end{figure}
+
+\subsection{Keel-Plate Demonstration Cases}
+\Cref{tab:keel} summarizes completed keel-plate runs (from \repoPath{summary.json} in each result folder). Deflection range is $w_{\max} - w_{\min}$.
+
+\begin{table}[H]
+\centering
+\caption{Keel-plate test cases: heat mode, passes, peak flux $q_0$, radius $r_0$, peak temperature, and deflection extrema.}
+\label{tab:keel}
+\begin{tabular}{llrrrrll}
+\toprule
+Case & Heat mode & Passes & $q_0$ (W/mm$^2$) & $r_0$ (mm) & $T_{\max}$ (K) & $w_{\max}$ / $w_{\min}$ (mm) \\
+\midrule
+Keel\_fast\_parallel & simultaneous & 1 & 59.05 & 9.0 & 1173.0 & 0.003 / $-0.044$ \\
+Keel\_practical      & simultaneous & 1 & 96.99 & 9.0 & 1171.7 & 8.32 / $-1.95$ \\
+Keel\_calibrated     & simultaneous & 1 & 12000  & 9.0 & 262.4  & 28.6 / $-6.14$ \\
+Keel\_enhanced       & simultaneous & 2 & 16000  & 9.0 & 262.5  & 48.1 / $-11.5$ \\
+Keel\_li2023\_scaled & sequential   & 2 & 55.42  & 7.0 & 1476.0 & 20.8 / $-7.96$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Deflection ranges: Keel\_fast\_parallel \SI{0.047}{mm}; Keel\_practical \SI{10.27}{mm}; Keel\_calibrated \SI{34.75}{mm}; Keel\_enhanced \SI{59.62}{mm}; Keel\_li2023\_scaled \SI{28.79}{mm}. Deflection magnitude increases with energy input and pass count as expected.

@@ -747,6 +747,7 @@ def solve_thermal_3d_with_peak(
     dt_min: float | None = None,
     dt_max: float | None = None,
     return_history: bool = False,
+    track_energy_balance: bool = False,
 ) -> tuple[np.ndarray, dict[str, float]] | tuple[np.ndarray, dict[str, float], list[np.ndarray], list[float]]:
     """Solve thermal problem and also track global peak temperature over time.
 
@@ -773,6 +774,13 @@ def solve_thermal_3d_with_peak(
 
     temps_history: list[np.ndarray] = []
     times_history: list[float] = []
+
+    # Optional energy-balance tracking (scalar totals). All quantities are in Joules (J) when
+    # using the internal mm/s/K unit system.
+    Q_in_total_J = 0.0
+    Q_conv_total_J = 0.0
+    Q_rad_total_J = 0.0
+    U_sensible_J = 0.0
 
     t = 0.0
     step = 0
@@ -828,6 +836,18 @@ def solve_thermal_3d_with_peak(
 
         # Picard iterations for temp-dependent K/M and linearized radiation
         T_iter = temperature.copy()
+
+        # Keep last-iteration operators for optional energy accounting.
+        M_last = None
+        Kb_top_last = None
+        rhs_top_last = None
+        Kb_bot_last = None
+        rhs_bot_last = None
+        Kr_top_last = None
+        rr_top_last = None
+        Kr_bot_last = None
+        rr_bot_last = None
+
         for _ in range(max(1, int(picard_iters))):
             if k_slope != 0.0 or cp_slope != 0.0:
                 K, M = assemble_heat_3d_temp_dependent(
@@ -844,10 +864,15 @@ def solve_thermal_3d_with_peak(
             else:
                 K, M = assemble_heat_3d(nodes, tet, conductivity, density, heat_capacity)
 
+            M_last = M
+
             Kb_top, rhs_top = assemble_convection_on_triangles(nodes, top_tri, h_conv_top_step, ambient_step)
             Kb_bot, rhs_bot = assemble_convection_on_triangles(nodes, bottom_tri, h_conv_bottom_step, ambient_step)
             Kb = Kb_top + Kb_bot
             rhs_b = rhs_top + rhs_bot
+
+            Kb_top_last, rhs_top_last = Kb_top, rhs_top
+            Kb_bot_last, rhs_bot_last = Kb_bot, rhs_bot
 
             if radiation_emissivity > 0.0:
                 T_lin = float(np.clip(np.max(T_iter), ambient_step, 3000.0))
@@ -859,6 +884,9 @@ def solve_thermal_3d_with_peak(
                 )
                 Kb = Kb + Kr_top + Kr_bot
                 rhs_b = rhs_b + rr_top + rr_bot
+
+                Kr_top_last, rr_top_last = Kr_top, rr_top
+                Kr_bot_last, rr_bot_last = Kr_bot, rr_bot
 
             A = sp.diags(M / dt_step) + K + Kb
             solver = spla.factorized(A.tocsc())
@@ -872,6 +900,43 @@ def solve_thermal_3d_with_peak(
             T_iter = solver(rhs)
 
         temperature = np.asarray(T_iter, dtype=float)
+
+        if track_energy_balance:
+            # Heat input (Gaussian surface flux): total power is the sum of the assembled nodal flux vector.
+            heat_power_W = 0.0
+            if active_positions:
+                for x_pos, y_pos in active_positions:
+                    heat_power_W += float(
+                        np.sum(
+                            assemble_gaussian_flux_on_triangles(
+                                nodes, top_tri, float(x_pos), float(y_pos), q0, r0, gaussian_beta
+                            )
+                        )
+                    )
+
+            # Convection loss power: ∫ h (T - T_inf) dA, using the assembled Robin operators.
+            conv_power_W = 0.0
+            if Kb_top_last is not None and rhs_top_last is not None:
+                conv_power_W += float(np.sum(Kb_top_last.dot(temperature) - rhs_top_last))
+            if Kb_bot_last is not None and rhs_bot_last is not None:
+                conv_power_W += float(np.sum(Kb_bot_last.dot(temperature) - rhs_bot_last))
+
+            # Radiation loss power (linearized): treated as an equivalent Robin term.
+            rad_power_W = 0.0
+            if radiation_emissivity > 0.0:
+                if Kr_top_last is not None and rr_top_last is not None:
+                    rad_power_W += float(np.sum(Kr_top_last.dot(temperature) - rr_top_last))
+                if Kr_bot_last is not None and rr_bot_last is not None:
+                    rad_power_W += float(np.sum(Kr_bot_last.dot(temperature) - rr_bot_last))
+
+            Q_in_total_J += float(dt_step) * float(heat_power_W)
+            Q_conv_total_J += float(dt_step) * float(conv_power_W)
+            Q_rad_total_J += float(dt_step) * float(rad_power_W)
+
+            # Sensible thermal energy relative to reference: U = Σ M_i (T_i - T_ref).
+            # Note: When cp_slope != 0, M depends on temperature (approximate accounting).
+            if M_last is not None:
+                U_sensible_J = float(np.sum(np.asarray(M_last, dtype=float) * (temperature - float(reference_temperature))))
 
         # Track global peak temperature over time
         step_idx = int(np.argmax(temperature))
@@ -914,6 +979,20 @@ def solve_thermal_3d_with_peak(
         "y_at_T_max_global": float(xyz[1]),
         "z_at_T_max_global": float(xyz[2]),
     }
+
+    if track_energy_balance:
+        residual_J = float(Q_in_total_J - Q_conv_total_J - Q_rad_total_J - U_sensible_J)
+        denom = max(1e-12, float(Q_in_total_J))
+        peak.update(
+            {
+                "Q_in_total_J": float(Q_in_total_J),
+                "Q_conv_total_J": float(Q_conv_total_J),
+                "Q_rad_total_J": float(Q_rad_total_J),
+                "U_sensible_J": float(U_sensible_J),
+                "energy_balance_residual_J": residual_J,
+                "energy_balance_residual_pct": float(100.0 * residual_J / denom),
+            }
+        )
 
     if return_history:
         return np.asarray(temperature, dtype=float), peak, temps_history, times_history
@@ -1740,6 +1819,12 @@ def main() -> None:
         help="Gaussian heat flux exponent beta in exp(-beta*r^2/r0^2). Use 3.0 for Li et al. (2023).",
     )
     parser.add_argument("--picard", type=int, default=1, help="Picard iterations per time step for k(T)/cp(T)/radiation")
+
+    parser.add_argument(
+        "--energy-balance",
+        action="store_true",
+        help="Track and report thermal energy balance (input vs convection/radiation losses vs sensible energy).",
+    )
     parser.add_argument("--T-inf", type=float, default=293.0, help="ambient temperature (K)")
     parser.add_argument("--T-ref", type=float, default=293.0, help="reference temperature (K)")
 
@@ -1961,6 +2046,7 @@ def main() -> None:
                 total_time=total_time,
                 dt_min=args.dt_min,
                 dt_max=args.dt_max,
+                track_energy_balance=bool(args.energy_balance),
             )
 
             peak = float(thermal_peak["T_max_global"])
@@ -2016,6 +2102,7 @@ def main() -> None:
                 dt_min=args.dt_min,
                 dt_max=args.dt_max,
                 return_history=True,
+                track_energy_balance=bool(args.energy_balance),
             )
     else:
         if args.use_elastoplastic and args.strong_coupling:
@@ -2056,6 +2143,7 @@ def main() -> None:
                 dt_min=args.dt_min,
                 dt_max=args.dt_max,
                 return_history=True,
+                track_energy_balance=bool(args.energy_balance),
             )
         else:
             temperature, thermal_peak = solve_thermal_3d_with_peak(
@@ -2094,6 +2182,7 @@ def main() -> None:
                 total_time=total_time,
                 dt_min=args.dt_min,
                 dt_max=args.dt_max,
+                track_energy_balance=bool(args.energy_balance),
             )
 
     assert temperature is not None

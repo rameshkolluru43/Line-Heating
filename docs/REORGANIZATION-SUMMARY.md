@@ -28,11 +28,14 @@ Ship_Plate_Bending_LineHeating/
 │   ├── README.md
 │   ├── run_config.example.json
 │   ├── config_forward_example.json
-│   └── config_inverse_example.json
+│   ├── config_inverse_example.json
+│   └── runs/               # Run configs (centerline, etc.)
 │
 ├── docs/                   # ← ORGANIZED: All documentation
 │   ├── README.md          # Documentation index
 │   ├── inherent_strain_models.tex
+│   ├── reports/           # Generated reports
+│   └── status/            # Simulation status snapshots
 │   │
 │   ├── guides/            # Setup & troubleshooting
 │   │   ├── SETUP.md
@@ -48,7 +51,9 @@ Ship_Plate_Bending_LineHeating/
 │       └── QUICK-START-USE-CASES.md
 │
 ├── results/               # ← Simulation outputs
+│   └── logs/              # Run logs + PIDs
 ├── scripts/               # Utility scripts
+│   └── cases/             # Test cases + demo runs
 ├── python_prototype/      # Python solver
 ├── thermo_fem/           # C++ solver
 └── LiteratureDocs/       # Reference papers
@@ -74,6 +79,10 @@ Ship_Plate_Bending_LineHeating/
 - config_forward_example.json
 - config_inverse_example.json
 
+**To `config/runs/`:**
+- run_centerline_900C.json
+- run_centerline_900C_v3.json
+
 **To `docs/guides/`:**
 - SETUP.md
 - OFFLINE-SETUP.md
@@ -86,6 +95,35 @@ Ship_Plate_Bending_LineHeating/
 **To `docs/reference/`:**
 - USE-CASES.md
 - QUICK-START-USE-CASES.md
+
+**To `docs/reports/`:**
+- KEEL_PLATE_ANALYSIS_REPORT.md
+
+**To `docs/status/`:**
+- SIMULATION_RUNNING.md
+- SIMULATION_STATUS.md
+
+**To `results/logs/`:**
+- simulation.pid
+- simulation_log.txt
+- simulation_fast_log.txt
+- simulation_output.log
+
+**To `scripts/cases/`:**
+- analyze_keel_plate.py
+- compare_curvature.py
+- demo_centerline_heating.py
+- plot_unscaled_vtk_deformation.py
+- plot_vtk_plate.py
+- run_keel_calibrated.py
+- run_keel_enhanced.py
+- run_keel_fast_parallel.py
+- run_keel_li2023_scaled.py
+- run_keel_optimize_loop.py
+- run_keel_optimize_loop_report.py
+- run_keel_optimized.py
+- run_keel_simulation.py
+- run_keel_simulation_parallel.py
 
 ### Files Updated:
 

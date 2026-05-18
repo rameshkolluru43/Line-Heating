@@ -1,0 +1,151 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{caption}
+
+\title{Keel Plate Line-Heating Report}
+\author{Generated from PlateLineheating Results}
+\date{\today}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single
+}
+
+\begin{document}
+\maketitle
+
+\section{Input IGES Geometry}
+The IGES surface (\texttt{IGESFiles/keel plate 0-5.igs}) is a NURBS surface.
+The extracted geometric measures used in the solver are summarized in Table~\ref{tab:iges}.
+
+\begin{table}[h!]
+\centering
+\caption{IGES-derived curvature metrics}
+\label{tab:iges}
+\begin{tabular}{lrr}
+\toprule
+Metric & Value & Units \\
+\midrule
+Z-range (deflection range) & 98.00 & mm \\
+Mean Z & 750.04 & mm \\
+Target radius $R$ & 11479.59 & mm \\
+Target curvature $\kappa=1/R$ & $8.711\times10^{-5}$ & 1/mm \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{FEM Solver Mathematics}
+The thermo-mechanical model follows a coupled line-heating formulation:
+
+\subsection*{Heat conduction}
+\begin{equation}
+\rho c_p \frac{\partial T}{\partial t} - \nabla \cdot (k \nabla T) = Q(x,y,z,t)
+\end{equation}
+where $Q$ is the moving Gaussian heat source along each heating line. Convection is applied on surfaces:
+\begin{equation}
+-k\nabla T \cdot \mathbf{n} = h_{\mathrm{conv}}(T - T_{\infty}).
+\end{equation}
+
+\subsection*{Mechanical equilibrium}
+\begin{equation}
+\nabla \cdot \boldsymbol{\sigma} + \mathbf{b} = 0,
+\end{equation}
+with linear elasticity and thermal/inherent strains
+\begin{equation}
+\boldsymbol{\varepsilon} = \boldsymbol{\varepsilon}^{\mathrm{el}} + \boldsymbol{\varepsilon}^{\mathrm{th}} + \boldsymbol{\varepsilon}^{\mathrm{inh}}.
+\end{equation}
+Thermal strain $\boldsymbol{\varepsilon}^{\mathrm{th}} = \alpha (T - T_{\mathrm{ref}})\mathbf{I}$,
+and the inherent strain $\boldsymbol{\varepsilon}^{\mathrm{inh}}$ is applied in a band around the heating lines.
+
+\section{Line Pattern and Heat Input}
+The final optimized line pattern uses five parallel lines across the plate width:
+
+\begin{itemize}
+  \item Number of lines: 5
+  \item Line positions (y): 166.67, 333.33, 500.00, 666.67, 833.33 mm
+  \item Line energy: 580 J/mm
+  \item Heat flux peak: $q_0 = 5800.01\ \mathrm{W/mm^2}$
+  \item Velocity: 10 mm/s
+  \item Passes: 1
+\end{itemize}
+
+Figure~\ref{fig:lines} shows the heating line profiles on the plate.
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=0.9\textwidth]{../results/keel_plate_opt_loop/iter_03/heating_line_profiles.png}
+  \caption{Heating line pattern and heat flux profiles (optimized run).}
+  \label{fig:lines}
+\end{figure}
+
+\section{FEM Results (Optimized Run)}
+The optimized simulation (iteration 3) achieves the target curvature within 0.3\%.
+
+\begin{table}[h!]
+\centering
+\caption{IGES target vs FEM results (optimized run)}
+\label{tab:comparison}
+\begin{tabular}{lrrr}
+\toprule
+Metric & IGES Target & FEM Result & Units \\
+\midrule
+Radius $R$ (transverse) & 11479.59 & 11510.89 & mm \\
+Curvature $\kappa$ (transverse) & $8.711\times10^{-5}$ & $8.687\times10^{-5}$ & 1/mm \\
+Deflection range & 98.000 & 19.306 & mm \\
+Max deflection & -- & 5.318 & mm \\
+Min deflection & -- & -13.988 & mm \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Figure~\ref{fig:deflection} shows the deformed shape from the FEM solution.
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=0.9\textwidth]{../results/keel_plate_opt_loop/iter_03/deflection_3d.png}
+  \caption{FEM deflection field (optimized run).}
+  \label{fig:deflection}
+\end{figure}
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=0.9\textwidth]{../results/keel_plate_opt_loop/iter_03/deflection_3d_overlay.png}
+  \caption{3D deformation overlay (VTK-derived).}
+  \label{fig:deflection_overlay}
+\end{figure}
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=0.9\textwidth]{../results/keel_plate_opt_loop/iter_03/deflection_3d_unscaled_vtk.png}
+  \caption{Unscaled deformation from VTK (deflection surface).}
+  \label{fig:deflection_unscaled}
+\end{figure}
+
+\section{Input Files}
+The final FEM inputs and the optimization script are included below.
+
+\subsection*{FEM Input JSON}
+\lstinputlisting{../config/keel_plate_opt_loop_final.json}
+
+\subsection*{Python Optimization Script}
+\lstinputlisting{../run_keel_optimize_loop_report.py}
+
+\section{Deflection Data}
+The node-wise deflection array is stored in:
+\begin{itemize}
+  \item \texttt{results/keel\_plate\_opt\_loop/iter\_03/displacement.npy}
+\end{itemize}
+and the summary statistics are in:
+\begin{itemize}
+  \item \texttt{results/keel\_plate\_opt\_loop/iter\_03/summary.json}
+  \item \texttt{results/keel\_plate\_opt\_loop/iter\_03/curvature\_comparison.json}
+\end{itemize}
+
+\end{document}

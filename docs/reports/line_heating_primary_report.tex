@@ -1,0 +1,355 @@
+% Ship Plate Line Heating - Primary Methodology & Results Report
+% Generated: 2026-01-27
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{mathtools}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage[nameinlink,noabbrev]{cleveref}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue,citecolor=blue}
+\captionsetup{font=small,labelfont=bf}
+\setlength{\emergencystretch}{2em}
+\sisetup{round-mode=places,round-precision=3}
+\setlist{nosep}
+
+\newcommand{\repoPath}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\vect}[1]{\boldsymbol{#1}}
+\newcommand{\tensor}[1]{\mathbf{#1}}
+
+\title{A 3D Thermo-Mechanical FEM Workflow for Ship Plate Line Heating: Methodology and Validation}
+\author{Dr Ramesh Kolluru}
+\date{27 January 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document summarizes the methodology and current results of a 3D coupled thermo-mechanical finite element workflow for ship-plate line heating. The workflow supports (i) forward simulation (given heating patterns, predict temperature and deformation) and (ii) inverse planning (given target curvature/deflection, optimize heating lines). We present the governing models, numerical discretization, implementation details, and a validation summary against Li et\,al. (2023), followed by representative keel-plate demonstrations.
+\end{abstract}
+
+\noindent\textbf{Keywords:} line heating; shipbuilding; finite element method; transient heat conduction; thermoelasticity; inherent strain; validation
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+Line heating is widely used in shipbuilding to induce controlled curvature in large steel plates through a localized, moving thermal input. This project implements a 3D thermo-mechanical workflow consisting of (a) heating plan definition, (b) transient thermal analysis with a moving heat source and surface losses, (c) mechanical response prediction (thermoelastic, with optional eigenstrain/inherent-strain residual surrogate), and (d) post-processing of deflection and curvature.
+
+\paragraph{Contributions} The main technical contributions reported here are:
+\begin{itemize}
+  \item A reproducible 3D transient thermo-mechanical tet4 workflow with a moving line-heat source, convection and optional radiation.
+  \item A calibrated inherent-strain (eigenstrain) surrogate linked to process parameters for efficient residual-deformation prediction.
+  \item Quantitative validation against published experimental benchmark cases (Li et\,al., 2023) across multiple process conditions.
+  \item Demonstration of multi-line heating plans on a realistic keel-plate section, including deflection and curvature metrics.
+\end{itemize}
+
+\paragraph{Scope and status} The current implementation focuses on reliable forward prediction and calibrated surrogate modeling. A full elastoplastic residual-stress model is described as an extension but is not yet the default path for all runs.
+
+\paragraph{Reproducibility} Inputs, outputs, and scripts are organized under \repoPath{config/}, \repoPath{results/}, and \repoPath{scripts/}. Selected commands are listed in \cref{sec:repro}.
+
+\section{Notation and Units}
+All equations are written in a consistent internal unit system used across the code paths: length in mm, time in s, temperature in K, stress in MPa, and energy in J. Key symbols used throughout:
+
+\begin{table}[H]
+\centering
+\caption{Primary symbols (non-exhaustive).}
+\begin{tabular}{ll}
+\toprule
+Symbol & Meaning \\
+\midrule
+$T$ & temperature \\
+$\rho$ & density \\
+$c_p$ & specific heat \\
+$k$ & thermal conductivity \\
+$h_{\mathrm{conv}}$ & convection coefficient \\
+$\varepsilon$ & emissivity \\
+$\sigma$ & Stefan--Boltzmann constant \\
+$\vect{u}$ & displacement field \\
+$\tensor{D}$ & isotropic elastic stiffness tensor \\
+$\alpha$ & thermal expansion coefficient \\
+$\boldsymbol{\varepsilon}$ & small-strain tensor \\
+$\boldsymbol{\sigma}$ & Cauchy stress tensor \\
+$\boldsymbol{\varepsilon}^{\mathrm{th}}$ & thermal strain \\
+$\boldsymbol{\varepsilon}^{\mathrm{inh}}$ & inherent/eigenstrain (surrogate) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Methods}
+\subsection{Geometry and Heating Plan}
+The keel plate IGES geometry (\repoPath{IGESFiles/keel plate 0-5.igs}) is analyzed to extract representative dimensions suitable for repeated simulation and parameter studies. A default representative section of \SI{3000}{mm} \(\times\) \SI{1000}{mm} \(\times\) \SI{49}{mm} is used for iterative testing.
+
+Heating plans are defined as a set of centerlines with associated process parameters (torch speed, energy per unit length, effective Gaussian radius, pass count, and scheduling). Sequential and simultaneous multi-line scheduling are supported.
+
+\subsection{Governing Equations}
+The implemented model is a sequentially coupled transient heat conduction problem with a (quasi-static) mechanical equilibrium solve driven by the temperature field.
+
+\subsubsection{Heat Conduction}
+\begin{align}
+\rho c_p(T) \frac{\partial T}{\partial t} &= \nabla \cdot \bigl(k(T) \nabla T\bigr) + Q(\mathbf{x},t), \\
+\mathbf{n}\cdot \bigl(k(T)\nabla T\bigr) &= h_{\mathrm{conv}}\,(T - T_{\infty}) + \varepsilon\sigma\,(T^4 - T_{\infty}^4),
+\end{align}
+where $Q$ represents the moving torch heat input applied as a surface flux mapped to boundary elements. Convection is modeled by a Robin boundary term, and radiation can be included either directly ($T^4$) or via a linearized Robin equivalent around a reference temperature for numerical convenience.
+
+The nominal moving Gaussian heat flux profile is
+\begin{equation}
+q(r,t) = q_0 \exp\left(-\beta \frac{r^2}{r_0^2}\right),
+\end{equation}
+where $r$ is the in-plane distance from the torch center, $q_0$ is the peak flux, and $r_0$ is the characteristic radius.
+
+\subsubsection{Mechanical Equilibrium (Thermoelasticity)}
+\begin{align}
+\nabla \cdot \boldsymbol{\sigma} &= \mathbf{0}, \\
+\boldsymbol{\sigma} &= \mathbf{D}(T):\bigl(\boldsymbol{\varepsilon}-\boldsymbol{\varepsilon}^{\mathrm{th}}-\boldsymbol{\varepsilon}^{\mathrm{inh}}-\boldsymbol{\varepsilon}^{\mathrm{p}}\bigr), \\
+\boldsymbol{\varepsilon}^{\mathrm{th}} &= \alpha(T)\,\bigl(T - T_{\mathrm{ref}}\bigr)\,\mathbf{I}.
+\end{align}
+Here $\tensor{D}(T)$ is the isotropic elastic stiffness, $\boldsymbol{\varepsilon}^{\mathrm{inh}}$ is the inherent strain surrogate (optional), and $\boldsymbol{\varepsilon}^{\mathrm{p}}$ denotes plastic strain for the elastoplastic extension (when enabled).
+
+\subsubsection{Elastoplastic Extension (Optional)}
+When enabled, a von Mises yield criterion with isotropic hardening is used:
+\begin{align}
+f(\boldsymbol{\sigma}) &= \sqrt{\tfrac{3}{2}}\,\lVert \mathbf{s} \rVert - \sigma_y(\kappa) \le 0, \\
+\sigma_y(\kappa) &= \sigma_{y0} + H\,\kappa,
+\end{align}
+with return mapping and consistent tangent for iterative equilibrium.
+
+\subsection{Inherent-Strain Surrogate (Residual Deformation Model)}
+Because residual curvature from line heating is strongly influenced by plasticity and phase/temperature-dependent effects, an inherent-strain (eigenstrain) surrogate is included to approximate post-heating residual deformation in a computationally efficient manner. In practice, the surrogate introduces an inelastic strain field $\boldsymbol{\varepsilon}^{\mathrm{inh}}$ concentrated near the heated path, parameterized by an amplitude and spatial support (band width and depth fraction). Theoretical background and calibration notes are documented in \repoPath{docs/inherent_strain_models.tex}.
+
+\subsection{Numerical Discretization}
+The spatial discretization uses linear tetrahedral elements (tet4). For heat conduction, the semi-discrete system reads
+\begin{equation}
+\mathbf{M}\,\dot{\mathbf{T}} + \mathbf{K}\,\mathbf{T} = \mathbf{f}_{\mathrm{heat}} + \mathbf{f}_{\mathrm{bc}},
+\end{equation}
+with lumped mass $\mathbf{M}$ and conductivity stiffness $\mathbf{K}$. Time integration uses backward Euler:
+\begin{equation}
+\bigl(\mathbf{M} + \Delta t\,\mathbf{K}\bigr)\,\mathbf{T}^{n+1} = \mathbf{M}\,\mathbf{T}^{n} + \Delta t\,(\mathbf{f}_{\mathrm{heat}}^{n+1}+\mathbf{f}_{\mathrm{bc}}^{n+1}).
+\end{equation}
+For mechanics, the linear elastic system is assembled as
+\begin{equation}
+\mathbf{K}_u\,\mathbf{u} = \mathbf{f}_{\mathrm{th}} + \mathbf{f}_{\mathrm{inh}},
+\end{equation}
+where $\mathbf{K}_u=\int B^T D B\,dV$ is built from the tet4 strain-displacement matrix $B$, and $\mathbf{f}_{\mathrm{th}}$ arises from thermal eigenstrain.
+
+\subsection{Execution Pipeline}
+The core solver is implemented in C++ with pybind11 bindings and orchestrated by Python runners. A typical run sequence:
+\begin{enumerate}
+  \item Build C++ extensions and dependencies (if needed)
+  \item Generate mesh with refinement near heating lines
+  \item Solve transient thermal field
+  \item Solve thermo-mechanical response
+  \item Write VTK, summary JSON, and plots
+\end{enumerate}
+
+\section{Software Implementation}
+Key components (paths relative to repository root):
+\begin{itemize}
+  \item 3D coupled solver driver: \repoPath{thermo\_fem/python/run\_coupled\_3d.py}
+  \item Case runners and scripts: \repoPath{scripts/cases/}
+  \item Configuration templates and run configs: \repoPath{config/}
+  \item Results outputs: \repoPath{results/}
+  \item Documentation: \repoPath{docs/}
+\end{itemize}
+
+The solver produces (i) VTK files for ParaView visualization, (ii) summary JSON files for quick comparison across cases, and (iii) optional PNG plots for reports.
+
+\section{Verification and Validation}
+\subsection{Li et al. (2023) Validation}
+Validation against Li et\,al. (2023) cases is summarized using the most recent calibrated comparison file (v8). We report absolute and relative errors in the experimental midspan residual deflection magnitude.
+
+\begin{table}[H]
+\centering
+\caption{Li2023 validation summary with relative errors (v8 full four cases, low-energy single-pass).}
+\begin{tabular}{rrrrrrrrr}
+\toprule
+Case & $v$ (mm/s) & $E$ (J/mm) & $t$ (mm) & $w_{\mathrm{exp}}$ (mm) & $w_{\mathrm{pred}}$ (mm) & $\Delta w$ (mm) & $\Delta w / w_{\mathrm{exp}}$ (\%) & $T_{\mathrm{peak}}$ (K) \\
+\midrule
+1 & 6.0 & 600 & 14 & 5.785 & 5.888 & 0.103 & 1.77 & 1173.6 \\
+6 & 11.0 & 600 & 14 & 7.712 & 7.722 & 0.010 & 0.13 & 1176.9 \\
+87 & 12.0 & 1000 & 10 & 13.506 & 13.486 & -0.020 & -0.15 & 1388.5 \\
+90 & 15.0 & 1000 & 10 & 11.322 & 11.319 & -0.003 & -0.03 & 1376.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Across these four published benchmark conditions, the mean absolute error is \SI{0.034}{mm} and the mean absolute percentage error is \SI{0.52}{\%}, with a maximum absolute percentage error of \SI{1.77}{\%} (Case~1). Over this limited set, errors do not exhibit a clear monotonic trend with torch speed, thickness, or energy per unit length; a broader sweep is recommended for publication-grade sensitivity analysis.
+
+\subsubsection{Representative thermal and deflection fields}
+To supplement scalar deflection comparisons, \cref{fig:li2023-v8-t,fig:li2023-v8-w} show representative temperature and deflection fields from one Li2023 validation run (Case~90).
+
+\begin{figure}[H]
+\centering
+\IfFileExists{../../results/li2023_case_090_v8_full_four_cases_lowE_single/temperature_top.png}{%
+  \includegraphics[width=0.9\linewidth]{../../results/li2023_case_090_v8_full_four_cases_lowE_single/temperature_top.png}
+}{\fbox{Missing: li2023\_case\_090\_v8\_full\_four\_cases\_lowE\_single/temperature\_top.png}}
+\caption{Li2023 Case~90 (v8): temperature field (top view) at the reported peak temperature time.}
+\label{fig:li2023-v8-t}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\IfFileExists{../../results/li2023_case_090_v8_full_four_cases_lowE_single/deflection_top.png}{%
+  \includegraphics[width=0.9\linewidth]{../../results/li2023_case_090_v8_full_four_cases_lowE_single/deflection_top.png}
+}{\fbox{Missing: li2023\_case\_090\_v8\_full\_four\_cases\_lowE\_single/deflection\_top.png}}
+\caption{Li2023 Case~90 (v8): residual deflection field (top view).}
+\label{fig:li2023-v8-w}
+\end{figure}
+
+\paragraph{Note on deeper time-series validation} The current repository outputs peak temperature and residual deformation metrics. If Li et\,al. provide time-series temperature or deflection histories, a follow-on validation should compare (i) a through-thickness temperature history at a representative location and (ii) a deflection--time curve during heating and cooling.
+
+\subsection{Numerical Verification: Resolution and Energy Balance}
+This work uses tet4 elements, backward Euler time integration, and Robin boundary conditions for convection and (optionally) radiation. Two verification items are particularly important for publication-quality rigor:
+\begin{enumerate}
+  \item \textbf{Space--time convergence:} repeat a canonical single-line heating case with progressively refined mesh (global $h$ and refined-band $h_{ref}$) and decreasing time step $\Delta t$, and demonstrate convergence of $T_{\max}$ and representative deflection/curvature metrics.
+  \item \textbf{Energy balance:} for at least one representative case, check that integrated heat input is consistent with sensible energy accumulation plus convection/radiation losses (within a few percent).
+\end{enumerate}
+
+\paragraph{Thermal sanity checks} The repository includes a small regression-style verification script \repoPath{thermo\_fem/python/verify\_thermal.py} that checks constant-temperature behavior (no heat input), heating response, and stability with temperature-dependent properties and radiation.
+
+\paragraph{Energy-balance reporting} The 3D thermal driver supports optional energy accounting via \code{--energy-balance}. When enabled, the run summary JSON reports scalar totals (J): \code{Q\_in\_total\_J}, \code{Q\_conv\_total\_J}, \code{Q\_rad\_total\_J}, \code{U\_sensible\_J}, and the residual \code{energy\_balance\_residual\_pct}. These values are intended as an implementation check (not a calibration target).
+
+\subsection{Demonstration Test Cases: Keel Plate}
+The following keel-plate cases have been executed and have summary outputs available. Additional runs exist in \repoPath{results/} for Li2023 calibration and parameter sweeps.
+
+\begin{table}[H]
+\centering
+\caption{Summary of completed keel-plate test cases (from \repoPath{summary.json}).}
+\begin{tabular}{lllllll}
+\toprule
+Case & Heat mode & Passes & $q_0$ & $r_0$ & $T_{\max}$ & $w_{\max}/w_{\min}$ \\
+ &  &  & (W/mm$^2$) & (mm) & (K) & (mm) \\
+\midrule
+Keel\_fast\_parallel & simultaneous & 1 & 59.050 & 9.0 & 1173.0 & 0.003 / -0.0438 \\
+Keel\_practical & simultaneous & 1 & 96.986 & 9.0 & 1171.68 & 8.316 / -1.953 \\
+Keel\_calibrated & simultaneous & 1 & 12000.0 & 9.0 & 262.43 & 28.607 / -6.141 \\
+Keel\_enhanced & simultaneous & 2 & 16000.0 & 9.0 & 262.52 & 48.082 / -11.539 \\
+Keel\_li2023\_scaled & sequential & 2 & 55.418 & 7.0 & 1475.94 & 20.833 / -7.961 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Note:} Some early runs use \code{T\_inf} and temperature inputs in mixed units; thermal maxima shown above are reported exactly as stored in \repoPath{summary.json}. These will be normalized to Kelvin in a subsequent audit.
+
+\subsection{Deflection Ranges}
+Deflection range is computed as \(w_{\max} - w_{\min}\). Reported ranges:
+\begin{itemize}
+  \item Keel\_fast\_parallel: \SI{0.0468}{mm}
+  \item Keel\_practical: \SI{10.27}{mm}
+  \item Keel\_calibrated: \SI{34.75}{mm}
+  \item Keel\_enhanced: \SI{59.62}{mm}
+  \item Keel\_li2023\_scaled: \SI{28.79}{mm}
+\end{itemize}
+
+\section{Results: Representative Fields and Plots}
+This section includes representative plots if available. If a file is missing, the figure is replaced with a placeholder box (to keep the PDF build reproducible on machines without locally generated outputs).
+
+\begin{figure}[H]
+\centering
+\IfFileExists{../../results/keel_plate_calibrated/deflection_3d.png}{%
+  \includegraphics[width=0.8\linewidth]{../../results/keel_plate_calibrated/deflection_3d.png}
+}{\fbox{Missing: keel\_plate\_calibrated/deflection\_3d.png}}
+\caption{3D deflection field (calibrated case).}
+\label{fig:defl-calibrated}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\IfFileExists{../../results/keel_plate_enhanced/deflection_3d.png}{%
+  \includegraphics[width=0.8\linewidth]{../../results/keel_plate_enhanced/deflection_3d.png}
+}{\fbox{Missing: keel\_plate\_enhanced/deflection\_3d.png}}
+\caption{3D deflection field (enhanced case).}
+\label{fig:defl-enhanced}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\IfFileExists{../../results/keel_plate_practical/deflection_3d.png}{%
+  \includegraphics[width=0.8\linewidth]{../../results/keel_plate_practical/deflection_3d.png}
+}{\fbox{Missing: keel\_plate\_practical/deflection\_3d.png}}
+\caption{3D deflection field (practical case).}
+\label{fig:defl-practical}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\IfFileExists{../../results/keel_plate_calibrated/curvature_analysis.png}{%
+  \includegraphics[width=0.8\linewidth]{../../results/keel_plate_calibrated/curvature_analysis.png}
+}{\fbox{Missing: keel\_plate\_calibrated/curvature\_analysis.png}}
+\caption{Curvature comparison plot (calibrated case).}
+\label{fig:curv-calibrated}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\IfFileExists{../../results/keel_plate_calibrated/camber_width_profile.png}{%
+  \includegraphics[width=0.8\linewidth]{../../results/keel_plate_calibrated/camber_width_profile.png}
+}{\fbox{Missing: keel\_plate\_calibrated/camber\_width\_profile.png}}
+\caption{Representative 1D camber/deflection profile across width (calibrated case), if generated during post-processing.}
+\label{fig:camber-profile-calibrated}
+\end{figure}
+
+\section{Discussion}
+The current results demonstrate consistent bending trends with increased energy input and pass count. Within the Li2023 benchmark set, residual deflection magnitudes are reproduced to within \SI{1.77}{\%} relative error for the cases reported here. For keel-plate demonstrations, the deflection amplitude increases monotonically across the calibrated and enhanced heating parameters. The Li2023-scaled sequential keel case achieves larger deflections but typically requires longer heating time and higher peak temperature.
+
+Key limitations and known issues:
+\begin{itemize}
+  \item Some runs use mixed temperature units; thermal normalization is required.
+  \item Residual deformation is approximated via inherent strain rather than full elastoplastic integration.
+  \item Full keel-plate simulation (sequential, high-resolution) is pending completion.
+\end{itemize}
+
+\section{Conclusion and Outlook}
+The workflow provides a reproducible 3D thermo-mechanical analysis pipeline for line heating, with quantitative validation against published Li2023 cases and representative ship-plate demonstrations. The next steps focus on thermal unit normalization across historical runs, broader sensitivity/verification studies (mesh/time-step and energy balance checks), higher-resolution sequential cases, and integrating elastoplastic residual modeling to reduce reliance on surrogate eigenstrain for residual curvature.
+
+\subsection*{Planned Work}
+\begin{enumerate}
+  \item Normalize thermal inputs and re-run calibrated/enhanced cases in Kelvin.
+  \item Execute full-resolution sequential case for the keel section.
+  \item Integrate elastoplastic model and validate residual curvature.
+  \item Compare against experimental or shipyard reference data.
+\end{enumerate}
+
+\section*{References}
+\begin{itemize}
+  \item Project reports: \repoPath{docs/reports/KEEL\_PLATE\_ANALYSIS\_REPORT.md}
+  \item Li et\,al. (2023) experimental calibration cases (see \repoPath{results/li2023\_case\_*})
+  \item Inherent strain models: \repoPath{docs/inherent\_strain\_models.tex}
+\end{itemize}
+
+\appendix
+\section{Reproducibility: Key Commands}
+\label{sec:repro}
+\begin{itemize}
+  \item Run fast parallel case:
+  \begin{verbatim}
+python scripts/cases/run_keel_fast_parallel.py
+  \end{verbatim}
+  \item Run calibrated case:
+  \begin{verbatim}
+python scripts/cases/run_keel_calibrated.py
+  \end{verbatim}
+  \item Run enhanced case:
+  \begin{verbatim}
+python scripts/cases/run_keel_enhanced.py
+  \end{verbatim}
+  \item Run Li2023 scaled case:
+  \begin{verbatim}
+python scripts/cases/run_keel_li2023_scaled.py --run
+  \end{verbatim}
+\end{itemize}
+
+\end{document}

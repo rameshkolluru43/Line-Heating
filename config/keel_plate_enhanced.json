@@ -1,0 +1,79 @@
+{
+  "_description": "Enhanced keel plate - 2 passes, 1600 J/mm, higher eps0",
+  "geometry": {
+    "Lx": 3000.0,
+    "Ly": 1000.0,
+    "thickness": 49.0
+  },
+  "mesh": {
+    "h": 60.0,
+    "h_refine": 30.0,
+    "refine_band": 120.0,
+    "mesh_algorithm": "Delaunay"
+  },
+  "material": {
+    "young_modulus": 210000.0,
+    "poisson_ratio": 0.3,
+    "thermal_expansion": 1.2e-05,
+    "density": 7850.0,
+    "specific_heat": 500.0,
+    "thermal_conductivity": 50.0
+  },
+  "heating": {
+    "mode": "simultaneous",
+    "q0": 16000.0,
+    "r0": 9.0,
+    "T_peak": 1200,
+    "velocity": 10.0,
+    "heat_lines": [
+      {
+        "x0": 0.0,
+        "y0": 166.66666666666666,
+        "x1": 3000.0,
+        "y1": 166.66666666666666
+      },
+      {
+        "x0": 0.0,
+        "y0": 333.3333333333333,
+        "x1": 3000.0,
+        "y1": 333.3333333333333
+      },
+      {
+        "x0": 0.0,
+        "y0": 500.0,
+        "x1": 3000.0,
+        "y1": 500.0
+      },
+      {
+        "x0": 0.0,
+        "y0": 666.6666666666666,
+        "x1": 3000.0,
+        "y1": 666.6666666666666
+      },
+      {
+        "x0": 0.0,
+        "y0": 833.3333333333333,
+        "x1": 3000.0,
+        "y1": 833.3333333333333
+      }
+    ],
+    "pass_repeats": 2,
+    "pass_gap": 0.0
+  },
+  "inherent_strain": {
+    "eps0": 0.04170037219669209,
+    "band_width": 40.0
+  },
+  "boundary": {
+    "bc_type": "centerline_fixed"
+  },
+  "solver": {
+    "dt": 3.0,
+    "t_total": 600.0,
+    "T_amb": 20.0,
+    "convection_coef": 25.0
+  },
+  "output": {
+    "result_dir": "results/keel_plate_enhanced"
+  }
+}

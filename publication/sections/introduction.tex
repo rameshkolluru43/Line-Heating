@@ -1,0 +1,18 @@
+\section{Introduction}
+\label{sec:intro}
+
+Line heating is a forming process used in shipyards to bend thick steel plates by applying a moving torch along prescribed paths. The resulting thermal gradients and inelastic deformation produce permanent curvature, which is used to shape hull plates, including keel and shell sections. Predictive simulation of line heating supports process design, inverse planning (finding heating patterns that achieve a target shape), and quality control.
+
+\paragraph{Scope}
+This paper documents a 3D coupled thermo-mechanical finite element (FEM) workflow implemented for ship-plate line heating. The workflow comprises: (a) heating plan definition (line positions, torch speed, energy per unit length), (b) transient 3D thermal analysis with a moving Gaussian heat source and surface convection (and optional radiation), (c) mechanical response via linear thermoelasticity with an optional inherent-strain (eigenstrain) surrogate for residual deformation, and (d) post-processing of deflection and curvature for validation and reporting.
+
+\paragraph{Contributions}
+\begin{itemize}
+  \item A reproducible 3D transient thermo-mechanical tet4 workflow with moving line heat source, convection, and optional radiation.
+  \item A calibrated inherent-strain surrogate linked to process parameters for efficient residual-deformation prediction.
+  \item Quantitative validation against four experimental benchmark cases from Li et al.\ \cite{li2023} with deflection errors below \SI{2}{\%}.
+  \item Demonstration on a representative keel-plate section with multiple heating lines and deflection/curvature metrics.
+\end{itemize}
+
+\paragraph{Reproducibility}
+Inputs, outputs, and scripts are organized under \repoPath{config/}, \repoPath{results/}, and \repoPath{scripts/} in the project repository. Key commands are listed in the appendix.

@@ -1,0 +1,73 @@
+% Ship Plate Line Heating: 3D Thermo-Mechanical FEM — Publishable Manuscript
+% Build from repo root: cd publication && latexmk -pdf main.tex
+% Or: pdflatex main.tex && bibtex main && pdflatex main.tex && pdflatex main.tex
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{mathtools}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage[nameinlink,noabbrev]{cleveref}
+
+\geometry{margin=1in}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue,citecolor=blue}
+\captionsetup{font=small,labelfont=bf}
+\setlength{\emergencystretch}{2em}
+\sisetup{round-mode=places,round-precision=3}
+\setlist{nosep}
+
+% Figure paths: run from publication/ so ../results/... resolves
+\graphicspath{%
+  {../results/li2023_case_090_v8_full_four_cases_lowE_single/}%
+  {../results/li2023_case_001_v8_full_four_cases_lowE_single/}%
+  {../results/keel_plate_practical/}%
+  {../results/keel_plate_enhanced/}%
+  {../results/keel_plate_calibrated/}%
+  {../results/keel_plate_li2023_scaled/}%
+  {figures/}%
+}
+
+\newcommand{\repoPath}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\vect}[1]{\boldsymbol{#1}}
+\newcommand{\tensor}[1]{\mathbf{#1}}
+
+\title{A 3D Thermo-Mechanical Finite Element Workflow for Ship Plate Line Heating: Methodology, Validation, and Application}
+\author{Ramesh Kolluru\\
+  \normalsize Ship Plate Bending Line Heating Project}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\input{sections/abstract}
+
+\noindent\textbf{Keywords:} line heating; shipbuilding; finite element method; transient heat conduction; thermoelasticity; inherent strain; Li~et~al.\ validation; keel plate
+
+\tableofcontents
+\newpage
+
+\input{sections/introduction}
+\input{sections/methods}
+\input{sections/validation}
+\input{sections/results}
+\input{sections/discussion}
+\input{sections/conclusion}
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\appendix
+\input{sections/appendix_reproducibility}
+
+\end{document}

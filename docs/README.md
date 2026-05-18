@@ -38,6 +38,11 @@ docs/
 │   ├── WINDOWS-QUICK-FIX.md
 │   ├── CROSS-PLATFORM-SUMMARY.md
 │   └── PLATFORM-INDEPENDENT.md
+├── reports/             # Generated reports
+│   └── KEEL_PLATE_ANALYSIS_REPORT.md
+├── status/              # Simulation status snapshots
+│   ├── SIMULATION_RUNNING.md
+│   └── SIMULATION_STATUS.md
 └── reference/           # Technical reference and use cases
     ├── USE-CASES.md
     ├── QUICK-START-USE-CASES.md
