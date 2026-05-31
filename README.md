@@ -62,7 +62,18 @@ The active validation meshes are engineering-resolution unstructured tet4 grids:
 - Li2023 plate cases: typically about 8.5k to 9.6k nodes and 30k to 37k tetrahedra.
 - Keel-plate demonstrations: about 8k to 23k nodes and 24k to 88k tetrahedra, depending on mesh settings.
 
-Linear tetrahedra provide nominal second-order spatial behavior for smooth elliptic problems, while backward Euler is first-order accurate in time. In practice, localized moving heat sources, unstructured grids, centroid-based surface flux integration, and the inherent-strain surrogate limit the effective accuracy. A formal mesh/time convergence campaign is planned but is not yet complete for all reported cases.
+Linear tetrahedra provide nominal second-order spatial behavior for smooth elliptic problems, while backward Euler is first-order accurate in time. In practice, localized moving heat sources, unstructured grids, centroid-based surface flux integration, and the inherent-strain surrogate limit the effective accuracy.
+
+A representative Li2023 Case 6 mesh/time-step sensitivity matrix has been completed:
+
+| Setting | `dt` (s) | `h_refine` (mm) | `T_peak` (K) | `|w|max` (mm) |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline paper setting | 2.0 | 5.0 | 1176.9 | 7.722 |
+| Refined time step | 1.0 | 5.0 | 1169.3 | 7.724 |
+| Refined heating-band mesh | 2.0 | 2.5 | 1173.2 | 8.819 |
+| Refined mesh + time step | 1.0 | 2.5 | 1174.9 | 8.819 |
+
+For this case, halving the time step changes `|w|max` by only about 0.03%, while refining the heating-band mesh changes it by about 14.2%. Broader convergence across additional cases is still recommended before making general convergence claims.
 
 ## Heat-Source Modes
 
@@ -263,13 +274,15 @@ python3 scripts/clean_generated.py --apply --include-build --include-caches --in
 - `docs/guides/QUICK-REFERENCE.md` - command reference.
 - `docs/guides/WINDOWS-VS-TROUBLESHOOTING.md` - Windows compiler troubleshooting.
 - `publication2/README.md` - manuscript package instructions.
+- `publication2/ELASTOPLASTIC_INHERENT_STRAIN_COMPARISON.md` - diagnostic J2 elastoplastic vs. calibrated inherent-strain comparison.
+- `results/li2023_case_006_mesh_dt_sensitivity.csv` - completed Case 6 mesh/time-step sensitivity matrix.
 
 ## Current Limitations
 
 - The main validation workflow uses an inherent-strain surrogate for residual bending rather than fully coupled transient elastoplastic forming.
 - The induction-skin option is a reduced thermal deposition model, not a complete electromagnetic field solver.
 - Wall-clock runtimes are not consistently logged in all archived summaries.
-- A systematic mesh/time convergence study is still needed for full publication-grade numerical verification.
+- A representative Case 6 mesh/time-step sensitivity matrix is complete, but broader convergence over additional cases and refinement levels is still needed for publication-grade numerical verification.
 - The active manuscript bibliography should be completed with the final Li et al. (2023) citation details before submission.
 
 ## Units

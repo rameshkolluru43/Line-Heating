@@ -1,0 +1,179 @@
+  \section{Methods}
+  \label{sec:methods}
+
+  % Notation and units are given in \cref{sec:nomenclature}.
+
+  \subsection{Material Properties (Li et al.\ Table~1, Q345)}
+  \Cref{tab:q345} lists temperature-dependent Q345 properties used in the Li2023 benchmark runs. Thermal conductivity $k(T)$ and specific heat $c_p(T)$ are approximated by linear slopes fitted to the tabulated values; density, Poisson's ratio, thermal expansion, and elastic modulus are passed as piecewise tables to the solver. The modulus-of-elasticity column is used for $\tensor{D}(T)$; the separate Young's-modulus column in the source table is retained for reference only.
+
+  \begin{table}[H]
+  \centering
+  \caption{Q345 steel properties (Li et al.\ Table~1).}
+  \label{tab:q345}
+  \small
+  \resizebox{\linewidth}{!}{%
+  \begin{tabular}{rrrrrrr}
+  \toprule
+  $T$ (\si{\celsius}) & $k$ [\si{W/(m.K)}] & $\rho$ [\si{kg/m^3}] & $c_p$ [\si{J/(kg.K)}] & $\nu$ & $\alpha$ [\si{1/K}] & $E$ [\si{MPa}] \\
+  \midrule
+  20   & 50 & 7820 & 460 & 0.28 & $1.1\times10^{-5}$ & $2.05\times10^{5}$ \\
+  250  & 47 & 7700 & 480 & 0.29 & $1.2\times10^{-5}$ & $1.87\times10^{5}$ \\
+  500  & 40 & 7610 & 530 & 0.31 & $1.39\times10^{-5}$ & $1.5\times10^{5}$ \\
+  750  & 27 & 7550 & 675 & 0.35 & $1.48\times10^{-5}$ & $7.0\times10^{4}$ \\
+  1000 & 30 & 7490 & 670 & 0.40 & $1.34\times10^{-5}$ & $2.0\times10^{3}$ \\
+  1500 & 45 & 7350 & 660 & 0.49 & $1.33\times10^{-5}$ & $1.5\times10^{3}$ \\
+  \bottomrule
+  \end{tabular}
+  }
+  \end{table}
+
+  \subsection{Geometry and Heating Plan}
+  Plate geometry is defined by length $L_x$, width $L_y$, and thickness $t$. Li2023 benchmarks use $L_x=\SI{400}{mm}$, $L_y=\SI{300}{mm}$ with thickness $t\in\{10,14\}\,\si{mm}$. For the keel-plate demonstrations, a representative section of \SI{3000}{mm} $\times$ \SI{1000}{mm} $\times$ \SI{49}{mm} is used. Heating plans specify centerlines (e.g.\ $y = \mathrm{const}$ or arbitrary segments), torch speed $v$, energy per unit length $E$, effective Gaussian radius $r_0$, pass count, and scheduling (sequential or simultaneous multi-line).
+
+  Three heat-source idealizations are available in the workflow:
+  \begin{itemize}
+    \item \emph{Moving Gaussian source}: a localized Gaussian spot translates along the heating line at speed $v$ (torch-like heating).
+    \item \emph{Full-line Gaussian band}: a stationary Gaussian heat band is applied along the full line segment (a line-source approximation).
+    \item \emph{Skin-depth thermal source}: the absorbed line power is deposited volumetrically beneath the active line using a prescribed skin-depth attenuation.
+  \end{itemize}
+
+  \noindent For each active line segment, the full-line Gaussian band applies a surface heat flux on the top surface as a function of the shortest distance $d$ to the line,
+  \begin{equation}
+  q(d) = q_0 \exp\left(-\beta \frac{d^2}{r_0^2}\right),
+  \end{equation}
+  where $q_0$ is the peak heat-flux scale, $r_0$ is the Gaussian radius, and $\beta$ is a shape parameter.
+
+  The skin-depth thermal source converts the absorbed areal power into a volumetric heat-input approximation,
+  \begin{equation}
+  Q(d,z) =
+  \eta q_0 \exp\left(-\beta \frac{d^2}{r_0^2}\right)
+  \frac{\exp[-(t-z)/\delta]}{\delta\left(1-\exp[-t/\delta]\right)},
+  \qquad
+  \delta=\sqrt{\frac{\rho_e}{\pi f \mu_0 \mu_r}},
+  \end{equation}
+  where $z=t$ is the top surface, $f$ is a prescribed frequency scale, $\rho_e$ is electrical resistivity, $\mu_r$ is relative permeability, $\mu_0$ is free-space permeability, and $\eta$ is absorbed-power efficiency. This is a reduced thermal approximation for line heating; it does not solve the surrounding coil field and is not used as evidence for electromagnetic model validation.
+
+  \paragraph{Scheduling (simultaneous vs. sequential)}
+  For multi-pass and multi-line plans, the runner supports two time-activation modes. In \emph{simultaneous} mode, all active lines remain on over a single heating window of duration $t_{\mathrm{heat}}=L/v$ (with $L$ the line length). A ``collapsed'' representation of $N$ passes can be formed by using one extended event with an effective velocity $v_{\mathrm{eff}}=v/N$. In \emph{sequential} mode, each pass is applied as a separate thermal cycle of duration $L/v$ (optionally with a gap), which preserves pass-by-pass heating and cooling.
+
+  \paragraph{Quenching}
+  Water quenching is represented by increasing the convective heat-transfer coefficient after the end of a heating event (post-heating cooling); it does not introduce additional induction physics.
+
+  \subsection{Governing Equations}
+
+  \subsubsection{Heat Conduction}
+  Transient 3D heat conduction with temperature-dependent $k(T)$, $c_p(T)$:
+  \begin{align}
+  \rho c_p(T) \frac{\partial T}{\partial t} &= \nabla \cdot \bigl(k(T) \nabla T\bigr) + Q(\mathbf{x},t), \\
+  \mathbf{n}\cdot \bigl(k\nabla T\bigr) &= h_{\mathrm{conv}}\,(T - T_{\infty}) + \varepsilon\sigma\,(T^4 - T_{\infty}^4)\quad \text{(boundaries)}.
+  \end{align}
+  The moving torch is applied as a surface flux. Convection, quenching, and (optionally) radiation are Robin-type boundary terms. The nominal Gaussian flux is
+  \begin{equation}
+  q(r,t) = q_0 \exp\left(-\beta \frac{r^2}{r_0^2}\right),\quad r^2 = (x-x_s(t))^2 + (y-y_{\mathrm{line}})^2.
+  \end{equation}
+  The initial moving-source flux scale is computed from line energy as
+  \begin{equation}
+  q_0 = \frac{2 E v}{\pi r_0^2},
+  \end{equation}
+  then optionally adjusted by the target-peak-temperature loop. For the full-line source, the corresponding initial estimate uses the line-integrated Gaussian band,
+  \begin{equation}
+  q_0 \approx \frac{E v}{L r_0 \sqrt{\pi/\beta}},
+  \end{equation}
+  with $L$ the active line length. These relations define the thermal input used for the process-comparison runs; the \code{induction\_skin} option then distributes absorbed power through the thickness using the skin-depth expression above.
+
+  \subsubsection{Mechanical Equilibrium}
+  Linear thermoelasticity with optional inherent strain:
+  \begin{align}
+  \nabla \cdot \boldsymbol{\sigma} &= \mathbf{0}, \\
+  \boldsymbol{\sigma} &= \mathbf{D}(T):\bigl(\boldsymbol{\varepsilon}-\boldsymbol{\varepsilon}^{\mathrm{th}}-\boldsymbol{\varepsilon}^{\mathrm{inh}}\bigr), \\
+  \boldsymbol{\varepsilon}^{\mathrm{th}} &= \alpha(T)\,\bigl(T - T_{\mathrm{ref}}\bigr)\,\mathbf{I}.
+  \end{align}
+  The inherent-strain term $\boldsymbol{\varepsilon}^{\mathrm{inh}}$ is a surrogate for the irreversible bending effect that would otherwise require a fully elastoplastic residual-stress calculation. In the present implementation, the surrogate is parameterized by an amplitude and a spatial support region near the heating line (band width and depth fraction). These parameters are calibrated from selected benchmark deflection data and then held fixed for the non-anchor validation cases. The reported residual deflections should therefore be interpreted as predictions of final forming response, not as resolved plastic-strain or residual-stress fields.
+
+  \subsection{Numerical Discretization}
+  \label{sec:numerical-discretization}
+
+  \subsubsection{Mesh generation and grid sizes}
+  Meshes are generated in Gmsh as unstructured 3D tetrahedral grids with local refinement in a band around each heating line. The global characteristic length is $h$, the refined length near the heat path is $h_{\mathrm{ref}}$, and the refinement band half-width is $b_{\mathrm{ref}}$. If $h_{\mathrm{ref}}$ is not specified, the solver defaults to $h_{\mathrm{ref}}=h/3$. Gmsh applies a distance-based size field from the heating-line curves, transitioning from $h_{\mathrm{ref}}$ within the band to $h$ in the far field.
+
+  Table~\ref{tab:mesh-settings} summarizes the mesh settings and resulting grid sizes used in the archived validation and demonstration runs reported in this paper.
+
+  \begin{table}[H]
+  \centering
+  \caption{Mesh settings and resulting grid sizes for representative archived runs.}
+  \label{tab:mesh-settings}
+  \small
+  \begin{tabular}{lrrrrrrrr}
+  \toprule
+  Case group & $L_x\times L_y\times t$ (mm) & $h$ & $h_{\mathrm{ref}}$ & $b_{\mathrm{ref}}$ & Nodes & Tetrahedra \\
+  \midrule
+  Li2023 v9 (typical) & $400\times300\times14$ & 20 & 5 & 60 & $\sim$8.5--9.6k & $\sim$30--37k \\
+  Keel practical & $3000\times1000\times49$ & 60 & 30 & 120 & $\sim$8.1k & $\sim$23.7k \\
+  Keel Li2023-scaled & $3000\times1000\times49$ & 40 & 20 & 100 & $\sim$23.1k & $\sim$87.5k \\
+  \bottomrule
+  \end{tabular}
+  \end{table}
+
+  For the Li2023 benchmark plate, the coarse background spacing is about one-seventh of the plate length in the longitudinal direction and one-fifteenth of the width, while the refined zone uses spacing about one-twentieth of the plate thickness. For the keel demonstrations, the background spacing is about 2\% of the plate length and the refined spacing is about 0.6\% of the length. The Li2023-scaled keel run is the finest archived keel mesh and is used for the longest simulated process time.
+
+  These meshes are engineering-resolution grids chosen to resolve the moving heat band and residual bending, not publication-grade convergence grids. A formal mesh-refinement study has not yet been completed for all reported cases.
+
+  \subsubsection{Spatial discretization}
+  Spatial discretization uses linear tet4 (4-node tetrahedral) elements throughout:
+  \begin{itemize}
+    \item \textbf{Heat conduction:} standard linear tetrahedral conductivity stiffness with lumped (mass-lumped) capacitance matrix.
+    \item \textbf{Mechanics:} linear tetrahedral elasticity with temperature-dependent elastic moduli interpolated from Table~1.
+    \item \textbf{Boundary fluxes:} surface Gaussian heat flux and convection/radiation are integrated on boundary triangles using element-centroid values.
+  \end{itemize}
+
+  For a regular mesh and smooth solution, linear tetrahedra give second-order spatial accuracy in the energy norm for temperature and displacement. In this project, unstructured meshes, localized heat gradients, and centroid-based boundary flux integration mean the practical accuracy is lower than ideal high-order convergence would suggest.
+
+  \subsubsection{Temporal discretization}
+  The transient heat equation is integrated with backward Euler:
+  \begin{equation}
+  \bigl(\mathbf{M} + \Delta t\,\mathbf{K}\bigr)\,\mathbf{T}^{n+1} = \mathbf{M}\,\mathbf{T}^{n} + \Delta t\,\mathbf{f}^{n+1}.
+  \end{equation}
+  This is first-order accurate in time and unconditionally stable for the linear heat equation with fixed coefficients. Archived Li2023 runs use $\Delta t=\SI{2}{s}$; keel runs use $\Delta t=\SIrange{2}{3}{s}$.
+
+  \subsubsection{Nonlinear and coupled effects}
+  The validated Li2023 workflow uses the following approximations, which govern the effective order of accuracy:
+  \begin{itemize}
+    \item \textbf{Mechanics in main validation:} linear thermoelasticity plus an inherent-strain surrogate for residual bending, not a full transient elastoplastic solve.
+    \item \textbf{Temperature-dependent properties:} $k(T)$ and $c_p(T)$ are updated with a Picard (fixed-point) linearization each time step.
+    \item \textbf{Radiation:} Stefan--Boltzmann radiation is linearized around the current temperature field.
+    \item \textbf{Optional elastoplastic mode:} a J2 elastoplastic tangent stiffness with Newton iterations is available in the code, but it is not the basis of the reported Li2023 validation results.
+  \end{itemize}
+
+  Overall, the FEM implementation should be described as a first-order-in-time, linear tet4 thermo-mechanical scheme with engineering nonlinearities handled by material update, inherent strain, and optional elastoplastic iteration rather than as a uniformly high-order coupled thermo-elasto-plastic solver.
+
+  \subsubsection{Mechanical equilibrium}
+  Mechanical equilibrium is solved as
+  \begin{equation}
+  \mathbf{K}_u\,\mathbf{u} = \mathbf{f}_{\mathrm{th}} + \mathbf{f}_{\mathrm{inh}},
+  \end{equation}
+  where $\mathbf{K}_u$ is assembled from tet4 strain-displacement matrices and $\mathbf{f}_{\mathrm{th}}$ arises from thermal strain. The inherent-strain load $\mathbf{f}_{\mathrm{inh}}$ is the calibrated surrogate used to represent permanent bending after cooldown.
+
+  \subsection{Time Discretization and Solve Cost}
+  \label{sec:time-aspect}
+
+  Two time scales are relevant. The first is the physical process time represented in the transient thermal analysis. For a moving line source with line length $L$, travel speed $v$, pass count $N$, and inter-pass gap $t_{\mathrm{gap}}$, the heating time is approximated as
+  \begin{equation}
+  t_{\mathrm{heat}} \approx N\frac{L}{v} + (N-1)t_{\mathrm{gap}},
+  \end{equation}
+  and the simulated time is $t_{\mathrm{total}}=t_{\mathrm{heat}}+t_{\mathrm{cool}}$, where $t_{\mathrm{cool}}$ is the post-heating cooldown period. The Li2023 benchmark runs use $\Delta t=\SI{2}{s}$ and \SI{200}{s} of extra cooling. The archived validation summaries contain 114--137 thermal steps, scan/heating times of \SIrange{26.7}{72.7}{s}, and total simulated times of \SIrange{226.7}{272.7}{s}. The corresponding meshes contain approximately 8.5--9.6k nodes and 29.8--36.8k tetrahedra.
+
+  The keel-plate demonstrations are longer because of the larger \SI{3000}{mm} plate length and multi-line/pass schedules. Archived keel summaries use $\Delta t=\SIrange{2}{3}{s}$, 134--1933 thermal steps, scan/heating times of \SIrange{250}{3665}{s}, and total simulated times of \SIrange{300}{3865}{s}. The practical keel case uses $\Delta t=\SI{3}{s}$, 134 steps, \SI{300}{s} heating time, and \SI{400}{s} total simulated time; the Li2023-scaled keel case is the longest archived run, with 1933 steps and \SI{3865}{s} total simulated time.
+
+  The second time scale is computational wall-clock time. The current archived summaries record mesh size, timestep count, and physical simulated time, but they do not consistently record wall-clock runtime. Earlier run notes estimate about 30--60 minutes for full sequential keel simulations and about 10--15 minutes for the fast parallel keel demonstration on the local workstation. Because these are environment-dependent observations rather than logged benchmark timings, the paper reports timestep counts and simulated process time as reproducible cost indicators and treats wall-clock runtime as hardware dependent.
+
+  \subsection{Software Implementation}
+  The core solver is implemented in C++ (pybind11) and driven by Python: mesh generation (Gmsh), thermal solve, mechanical solve, and output of VTK, summary JSON, and PNG plots. See \cref{sec:repro} for run commands.
+
+  \subsection{Forward and Inverse Line-Heating Problems}
+  \label{sec:forward-inverse}
+
+  \paragraph{Forward problem (analysis)}
+  Given a plate geometry, material model, boundary/fixture conditions, and a prescribed heating plan (heat-source type, line locations, $E$, $v$, $r_0$, pass count, and scheduling), the forward problem computes the transient temperature field and the resulting residual deformation after cooldown. This paper focuses on validating this forward pipeline against Li et al.\ \cite{li2023}.
+
+  \paragraph{Inverse problem (planning)}
+  Given a target shape specification (e.g., transverse camber profile or curvature/radius), the inverse problem seeks a heating plan that reproduces the target within an error tolerance. In this work, inverse planning is treated as an extension of the validated forward workflow: candidate heating plans are simulated, the mismatch is evaluated, and parameters are updated by an outer optimization loop. Each inverse objective evaluation calls the same forward solver described above, so inverse wall time scales approximately with the number of forward evaluations. The implemented planner uses Nelder--Mead with a configurable maximum iteration count; the keel IGES inverse configuration uses five line-position variables plus shared energy, velocity, and pass count with \code{maxiter}=20. A completed single-line demonstration in the project records 56 objective evaluations and converges from $(y,E,v,N)=(150\,\mathrm{mm},600\,\mathrm{J/mm},6\,\mathrm{mm/s},1)$ to approximately $(150.49\,\mathrm{mm},602.66\,\mathrm{J/mm},6.06\,\mathrm{mm/s},1)$ with objective $3.89\times10^{-4}$. A full IGES keel inverse run is therefore expected to cost tens of forward solves; the manuscript's IGES result is presented as a representative inverse-planning solution rather than a fully logged converged optimization campaign.

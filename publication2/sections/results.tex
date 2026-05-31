@@ -1,0 +1,32 @@
+\section{Results: Representative Fields and Demonstration Cases}
+\label{sec:results}
+
+Representative temperature, deflection, and curvature outputs are produced by the solver and archived with the project artifacts. Quantitative validation results are given in \cref{sec:validation}; this section shows only the field plots needed to interpret the validated response and the application-scale keel demonstration. Additional case-wise surface panels are retained as supplementary artifacts rather than repeated in the main text.
+
+\subsection{Li2023 Benchmark Fields}
+\Cref{fig:li2023-fem-response-panel} gives a compact composite view for Case~90. The panel is designed for journal reporting: the heating-line plan defines the manufacturing input, the thermal contour shows the computed surface response, the residual-deflection contour shows the final forming response, and the midspan profile links the field solution to the scalar validation metric.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{li2023_case090_surface_panel.png}
+\caption{FEM-predicted thermo-mechanical response for Li2023 Case~90: (a) prescribed heating line and torch travel direction; (b) computed top-surface temperature field for the plotted time/state, with the marked peak-location indicator; (c) residual vertical deflection after cooling; and (d) midspan camber profile compared with the experimental maximum deflection. Temperature and displacement are reported in K and mm, respectively.}
+\label{fig:li2023-fem-response-panel}
+\end{figure}
+
+\paragraph{Case-wise surface panels}
+The remaining Li2023 case-wise surface panels are retained in \repoPath{publication2/figures/} as supplementary material. For the main manuscript, the representative panel in \cref{fig:li2023-fem-response-panel} is combined with the parity, residual, speed-sweep, and process-comparison plots in \cref{sec:validation}. This keeps the primary evidence quantitative while avoiding a long sequence of visually similar field composites.
+
+For the multi-pass process comparison, the main paper uses the quantitative bar chart in \cref{fig:li2023-process-comparison}. The v10 collapsed schedule produces approximately half the measured deflection for Case~87 (\SI{6.735}{mm} vs.\ \SI{13.506}{mm}), while the v11 sequential schedule restores agreement (\SI{13.471}{mm}).
+
+\subsection{Keel-Plate Demonstrations}
+\Cref{fig:keel-application-panel} presents a practical keel-plate demonstration as an application-scale example of the workflow. This example is not used as experimental validation; its purpose is to show how the validated forward solver can generate manufacturing-relevant outputs for a larger plate.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{keel_practical_surface_panel.png}
+\caption{Keel-plate practical demonstration: prescribed heating-line pattern, residual deflection contour, curvature contour, and amplified 3D residual shape. The 3D panel is used only for visual interpretation; quantitative assessment should be based on contour values and camber/curvature profiles. Experimental or target-shape data are required before this case can be treated as validation.}
+\label{fig:keel-application-panel}
+\end{figure}
+
+\paragraph{Inverse-planning extension}
+The same forward workflow can be embedded in an outer inverse-planning loop, where heating-line locations and process variables are updated until a target camber or curvature mismatch is reduced. In the present manuscript this capability is treated as a planning extension, because the reported validation is for forward prediction. A separate inverse-planning study should include target geometry, optimizer settings, convergence history, and independent verification of the final heating plan.

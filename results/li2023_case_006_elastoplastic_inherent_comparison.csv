@@ -1,0 +1,3 @@
+model,case_id,velocity_mm_s,energy_J_mm,thickness_mm,passes,w_abs_max_mm,T_peak_K,plasticity_indicator,source_summary
+Inherent strain (calibrated),6,11,600,14,2,7.722041,1176.900188,eps0=4.7736e-2; no resolved plastic-strain field,results/li2023_case_006_v9_table2_extended/summary.json
+Elastoplastic J2 (strong-coupled),6,11,600,14,2,0.095583,1176.900188,epbar_max=5.8846e-2; epbar_mean=4.3067e-4; epbar_p95=2.9913e-3; active_elements=5342/36780 (14.5%),results/li2023_case_006_j2_elastoplastic_strong_compare/summary.json

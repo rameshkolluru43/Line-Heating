@@ -1,0 +1,5 @@
+setting,slug,dt_s,h_mm,h_refine_mm,refine_band_mm,n_nodes,n_tets,T_peak_K,w_max_mm,camber_midspan_mm,summary
+Baseline (paper setting),baseline,2.0,20.0,5.0,60.0,9564,36780,1176.9,7.722,-0.5193,results/li2023_case_006_v9_table2_extended/summary.json
+Refined time step,dt1,1.0,20.0,5.0,60.0,9564,36780,1169.264,7.7241,-0.5204,results/li2023_case_006_sensitivity_dt1/summary.json
+Refined mesh (band),mesh_refined,2.0,20.0,2.5,60.0,49695,235939,1173.15,8.819,-0.2271,results/li2023_case_006_sensitivity_mesh_refined/summary.json
+Refined mesh + time step,mesh_refined_dt1,1.0,20.0,2.5,60.0,49695,235939,1174.932,8.8194,-0.2271,results/li2023_case_006_sensitivity_mesh_refined_dt1/summary.json

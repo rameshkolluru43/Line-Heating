@@ -1,0 +1,80 @@
+% Ship Plate Line Heating: 3D Thermo-Mechanical FEM — Publishable Manuscript
+% Build from repo root: cd publication2 && latexmk -pdf main.tex
+% Or: pdflatex main.tex && bibtex main && pdflatex main.tex && pdflatex main.tex
+% Target journal: Journal of Ship Production and Design (ship production / manufacturing workflow).
+% The official T\&F LaTeX class (`interact.cls`) is not included in this project,
+% so we compile with `article` while keeping a T\&F-like natbib citation workflow.
+\documentclass[12pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+
+\usepackage{authblk}
+
+% T\&F journals typically use natbib.
+\usepackage[numbers,sort&compress]{natbib}
+
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{mathtools}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage[nameinlink,noabbrev]{cleveref}
+
+% Flowcharts (TikZ) used in Validation / Methods.
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,backgrounds}
+
+% Simple keywords block (for `article` class).
+\newenvironment{keywords}{\par\small\noindent\textbf{Keywords: }\ignorespaces}{\par}
+
+\setlength{\emergencystretch}{2em}
+\sisetup{round-mode=places,round-precision=3}
+\setlist{nosep}
+
+% Figures are stored in publication/figures/.
+\graphicspath{{figures/}}
+
+\newcommand{\repoPath}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\vect}[1]{\boldsymbol{#1}}
+\newcommand{\tensor}[1]{\mathbf{#1}}
+
+\title{A ship-production finite element workflow for line-heating forming of steel plates: validation and process-scheduling effects}
+
+\author[1]{Ramesh Kolluru}
+\author[2]{Kiran J}
+\author[2]{TVK Bhanuprakash}
+
+\affil[1]{Independent researcher; consultant to BQP}
+\affil[2]{Department of Marine Engineering, Andhra University}
+
+\begin{document}
+\maketitle
+
+\input{sections/abstract}
+
+\begin{keywords}
+line heating; ship production; plate forming; finite element method; transient heat conduction; inherent strain; process planning; keel plate
+\end{keywords}
+
+\input{sections/nomenclature}
+\input{sections/introduction}
+\input{sections/methods}
+\input{sections/validation}
+\input{sections/results}
+\input{sections/discussion}
+\input{sections/conclusion}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\appendix
+\input{sections/appendix_reproducibility}
+
+\end{document}

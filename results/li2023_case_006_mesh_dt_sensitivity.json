@@ -1,0 +1,61 @@
+{
+  "case_id": 6,
+  "rows": [
+    {
+      "setting": "Baseline (paper setting)",
+      "slug": "baseline",
+      "dt_s": 2.0,
+      "h_mm": 20.0,
+      "h_refine_mm": 5.0,
+      "refine_band_mm": 60.0,
+      "n_nodes": 9564,
+      "n_tets": 36780,
+      "T_peak_K": 1176.9,
+      "w_max_mm": 7.722,
+      "camber_midspan_mm": -0.5193,
+      "summary": "results/li2023_case_006_v9_table2_extended/summary.json"
+    },
+    {
+      "setting": "Refined time step",
+      "slug": "dt1",
+      "dt_s": 1.0,
+      "h_mm": 20.0,
+      "h_refine_mm": 5.0,
+      "refine_band_mm": 60.0,
+      "n_nodes": 9564,
+      "n_tets": 36780,
+      "T_peak_K": 1169.264,
+      "w_max_mm": 7.7241,
+      "camber_midspan_mm": -0.5204,
+      "summary": "results/li2023_case_006_sensitivity_dt1/summary.json"
+    },
+    {
+      "setting": "Refined mesh (band)",
+      "slug": "mesh_refined",
+      "dt_s": 2.0,
+      "h_mm": 20.0,
+      "h_refine_mm": 2.5,
+      "refine_band_mm": 60.0,
+      "n_nodes": 49695,
+      "n_tets": 235939,
+      "T_peak_K": 1173.15,
+      "w_max_mm": 8.819,
+      "camber_midspan_mm": -0.2271,
+      "summary": "results/li2023_case_006_sensitivity_mesh_refined/summary.json"
+    },
+    {
+      "setting": "Refined mesh + time step",
+      "slug": "mesh_refined_dt1",
+      "dt_s": 1.0,
+      "h_mm": 20.0,
+      "h_refine_mm": 2.5,
+      "refine_band_mm": 60.0,
+      "n_nodes": 49695,
+      "n_tets": 235939,
+      "T_peak_K": 1174.932,
+      "w_max_mm": 8.8194,
+      "camber_midspan_mm": -0.2271,
+      "summary": "results/li2023_case_006_sensitivity_mesh_refined_dt1/summary.json"
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+\section{Reproducibility}
+\label{sec:repro}
+
+This appendix summarizes the main steps used to reproduce the simulations, validation tables, and figures reported in the manuscript.
+
+\subsection{Li et al.\ (2023) Table~2 cases}
+\begin{verbatim}
+# Validate all 11 published cases (reads summary.json)
+python3 scripts/validate_li2023_all.py --cases all \
+  --tag v9_table2_extended
+
+# Run all 11 FEM cases (slow; ~30+ min each)
+python3 scripts/run_li2023_cases.py --cases all \
+  --tag v9_table2_extended
+
+# Run calibration subset only (cases 1, 6, 87, 90)
+python3 scripts/run_li2023_cases.py --cases calibration \
+  --tag v8_full_four_cases_lowE_single
+\end{verbatim}
+
+Data definitions: \repoPath{scripts/li2023\_data.py}, \repoPath{config/data/li2023\_tables.json}.
+
+\begin{verbatim}
+# Regenerate long-format validation CSV and publication plots
+.venv_lineheating/bin/python \
+  scripts/make_publication_validation_figures.py
+
+# Regenerate journal-style FEM surface panels
+.venv_lineheating/bin/python \
+  scripts/make_publication_surface_panels.py
+
+# Execute calibration, thermal-unit audit, and verification scaffold
+.venv_lineheating/bin/python \
+  scripts/execute_planned_work_items.py
+\end{verbatim}
+
+These commands write long-format validation CSV files, metrics JSON files, validation plots, journal-style FEM surface panels, velocity-dependent calibration outputs, keel thermal-unit audit tables, and verification/energy scaffold files under \repoPath{results/} and the publication figure folders.
+
+\subsection{Induction-style line-source process comparison}
+\begin{verbatim}
+# Collapsed full-line induction source with quench (all 11 cases)
+python3 scripts/run_li2023_induction_cases.py --cases all \
+  --tag v10_induction_simul_quench \
+  --heat-mode simultaneous --skip-existing
+
+# Sequential line-source induction with quench (multi-pass subset)
+python3 scripts/run_li2023_induction_cases.py --cases 6,7,87,88,89 \
+  --tag v11_induction_seq_quench \
+  --heat-mode sequential --skip-existing
+
+# Volumetric induction skin-depth source
+python3 scripts/run_li2023_induction_cases.py --cases 6,7,87,88,89 \
+  --tag v12_induction_skin_seq_quench \
+  --heat-mode sequential --heat-source-mode induction_skin \
+  --induction-frequency 10000 --induction-relative-permeability 100 \
+  --induction-electrical-resistivity 2.5e-7 --induction-efficiency 0.8 \
+  --skip-existing
+
+# Validate available v11 summaries
+python3 scripts/validate_li2023_all.py --cases 6,7,87,88,89 \
+  --tag v11_induction_seq_quench
+\end{verbatim}
+
+The v10 configuration uses a single full-line heating event for multi-pass rows by reducing velocity to $v/N$. The v11 configuration keeps the same line heat source and quench model but repeats the pass sequentially. The v12 command switches from prescribed surface band heating to the \code{induction\_skin} volumetric source.
+
+\subsection{Keel-plate cases}
+\begin{verbatim}
+python scripts/cases/run_keel_fast_parallel.py
+python scripts/cases/run_keel_calibrated.py
+python scripts/cases/run_keel_enhanced.py
+python scripts/cases/run_keel_li2023_scaled.py --run
+\end{verbatim}
+
+\subsection{Build manuscript}
+\begin{verbatim}
+cd publication2
+latexmk -pdf main.tex
+\end{verbatim}
+Figures are read from the self-contained \repoPath{publication2/figures/} folder.

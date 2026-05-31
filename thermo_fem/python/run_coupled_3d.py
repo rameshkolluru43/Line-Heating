@@ -218,6 +218,10 @@ def _triangle_area_3d(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
     return 0.5 * float(np.linalg.norm(np.cross(b - a, c - a)))
 
 
+def _tetra_volume(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> float:
+    return abs(float(np.dot(b - a, np.cross(c - a, d - a)))) / 6.0
+
+
 def build_plate_mesh_3d(
     Lx: float,
     Ly: float,
@@ -545,6 +549,152 @@ def assemble_gaussian_flux_on_triangles(
     return rhs
 
 
+def assemble_line_gaussian_flux_on_triangles(
+    nodes: np.ndarray,
+    tri: np.ndarray,
+    line: dict[str, float],
+    q0: float,
+    r0: float,
+    beta: float = 2.0,
+) -> np.ndarray:
+    """Surface heat flux from a stationary Gaussian band along a full line segment.
+
+    This models an induction-style line source: the whole heat line is active at once,
+    with Gaussian decay normal to the line rather than a moving point source.
+    """
+    n = int(nodes.shape[0])
+    rhs = np.zeros(n, dtype=float)
+    if tri.size == 0 or q0 == 0.0:
+        return rhs
+
+    r0_sq = float(r0 * r0)
+    beta = float(beta)
+    for t in tri:
+        i0, i1, i2 = (int(t[0]), int(t[1]), int(t[2]))
+        a, b, c = nodes[i0], nodes[i1], nodes[i2]
+        area = _triangle_area_3d(a, b, c)
+        if area <= 0.0:
+            continue
+
+        centroid = (a + b + c) / 3.0
+        dist = float(_distance_to_segment(centroid[None, :2], line)[0])
+        q = float(q0 * np.exp(-beta * (dist * dist) / r0_sq))
+        if q < q0 * 1e-9:
+            continue
+
+        val = q * area / 3.0
+        rhs[i0] += val
+        rhs[i1] += val
+        rhs[i2] += val
+
+    return rhs
+
+
+def induction_skin_depth_mm(
+    frequency_hz: float,
+    electrical_resistivity_ohm_m: float,
+    relative_permeability: float,
+) -> float:
+    """Return induction skin depth in mm from delta=sqrt(rho_e/(pi*f*mu))."""
+    mu0 = 4.0e-7 * np.pi
+    f = max(1e-12, float(frequency_hz))
+    rho_e = max(1e-18, float(electrical_resistivity_ohm_m))
+    mu_r = max(1e-9, float(relative_permeability))
+    delta_m = float(np.sqrt(rho_e / (np.pi * f * mu0 * mu_r)))
+    return 1000.0 * delta_m
+
+
+def assemble_induction_skin_source_on_tets(
+    nodes: np.ndarray,
+    tet: np.ndarray,
+    line: dict[str, float],
+    q0: float,
+    r0: float,
+    beta: float,
+    thickness: float,
+    skin_depth_mm: float,
+    efficiency: float = 1.0,
+) -> np.ndarray:
+    """Volumetric induction source distributed with lateral Gaussian and skin-depth decay.
+
+    q0 is interpreted as absorbed peak areal power density (W/mm^2). It is
+    normalized over thickness so the depth integral recovers q0 at the line
+    center before lateral Gaussian decay.
+    """
+    n = int(nodes.shape[0])
+    rhs = np.zeros(n, dtype=float)
+    if tet.size == 0 or q0 == 0.0:
+        return rhs
+
+    r0_sq = float(r0 * r0)
+    beta = float(beta)
+    delta = max(1e-9, float(skin_depth_mm))
+    thickness = max(1e-9, float(thickness))
+    z_top = thickness
+    depth_norm = delta * (1.0 - float(np.exp(-thickness / delta)))
+    q0_absorbed = float(q0) * float(np.clip(efficiency, 0.0, None))
+
+    for e in tet:
+        i0, i1, i2, i3 = (int(e[0]), int(e[1]), int(e[2]), int(e[3]))
+        a, b, c, d = nodes[i0], nodes[i1], nodes[i2], nodes[i3]
+        vol = _tetra_volume(a, b, c, d)
+        if vol <= 0.0:
+            continue
+
+        centroid = (a + b + c + d) / 4.0
+        dist = float(_distance_to_segment(centroid[None, :2], line)[0])
+        lateral = float(np.exp(-beta * (dist * dist) / r0_sq))
+        if lateral < 1e-9:
+            continue
+
+        depth = float(np.clip(z_top - centroid[2], 0.0, thickness))
+        depth_weight = float(np.exp(-depth / delta)) / max(1e-12, depth_norm)
+        qv = q0_absorbed * lateral * depth_weight
+        val = qv * vol / 4.0
+        rhs[i0] += val
+        rhs[i1] += val
+        rhs[i2] += val
+        rhs[i3] += val
+
+    return rhs
+
+
+def _active_heat_lines_at_time(
+    *,
+    t: float,
+    velocity: float,
+    heat_lines: list[dict[str, float]],
+    heat_mode: str,
+    pass_gap: float,
+) -> list[dict[str, float]]:
+    """Return active full-line sources for an induction-style line heat source."""
+    heat_mode = str(heat_mode).strip().lower()
+    if not heat_lines or velocity <= 0.0:
+        return []
+
+    if heat_mode == "simultaneous":
+        active: list[dict[str, float]] = []
+        for ln in heat_lines:
+            duration = float(ln["length"]) / float(velocity)
+            if 0.0 <= float(t) <= duration:
+                active.append(ln)
+        return active
+
+    if heat_mode == "sequential":
+        local_t = float(t)
+        gap = float(max(0.0, pass_gap))
+        for ln in heat_lines:
+            duration = float(ln["length"]) / float(velocity)
+            if local_t < duration:
+                return [ln]
+            if local_t < duration + gap:
+                return []
+            local_t -= duration + gap
+        return []
+
+    raise ValueError(f"Unknown heat_mode: {heat_mode} (expected 'simultaneous' or 'sequential')")
+
+
 def _active_heat_sources_at_time(
     *,
     t: float,
@@ -622,11 +772,23 @@ def solve_thermal_3d(
     heat_mode: str = "simultaneous",
     pass_gap: float = 0.0,
     gaussian_beta: float = 2.0,
+    heat_source_mode: str = "moving_gaussian",
+    induction_frequency: float = 10000.0,
+    induction_relative_permeability: float = 100.0,
+    induction_electrical_resistivity: float = 2.5e-7,
+    induction_efficiency: float = 1.0,
 ) -> np.ndarray:
     temperature = np.full(nodes.shape[0], float(reference_temperature), dtype=float)
     if heat_lines is None:
         heat_lines = _build_heat_lines_from_ys(float(Lx), [float(y) for y in heat_ys])
     heat_lines = _prepare_heat_lines(list(heat_lines))
+    source_mode = str(heat_source_mode).strip().lower()
+    line_source_modes = {"line_gaussian", "induction_skin"}
+    skin_depth = induction_skin_depth_mm(
+        induction_frequency,
+        induction_electrical_resistivity,
+        induction_relative_permeability,
+    )
 
     for step in range(int(steps)):
         t = step * dt
@@ -637,6 +799,15 @@ def solve_thermal_3d(
             heat_mode=str(heat_mode),
             pass_gap=float(pass_gap),
         )
+        active_lines: list[dict[str, float]] = []
+        if source_mode in line_source_modes:
+            active_lines = _active_heat_lines_at_time(
+                t=float(t),
+                velocity=float(velocity),
+                heat_lines=heat_lines,
+                heat_mode=str(heat_mode),
+                pass_gap=float(pass_gap),
+            )
 
         # Optional uniform quench phase (stronger convection / different ambient)
         h_conv_top_step = float(h_conv_top)
@@ -691,7 +862,25 @@ def solve_thermal_3d(
             solver = spla.factorized(A.tocsc())
 
             rhs = (M / dt) * temperature + rhs_b
-            if active_positions:
+            if source_mode == "line_gaussian":
+                for ln in active_lines:
+                    rhs += assemble_line_gaussian_flux_on_triangles(
+                        nodes, top_tri, ln, q0, r0, gaussian_beta
+                    )
+            elif source_mode == "induction_skin":
+                for ln in active_lines:
+                    rhs += assemble_induction_skin_source_on_tets(
+                        nodes,
+                        tet,
+                        ln,
+                        q0,
+                        r0,
+                        gaussian_beta,
+                        thickness=float(np.max(nodes[:, 2]) - np.min(nodes[:, 2])),
+                        skin_depth_mm=skin_depth,
+                        efficiency=induction_efficiency,
+                    )
+            elif active_positions:
                 for x_pos, y_pos in active_positions:
                     rhs += assemble_gaussian_flux_on_triangles(
                         nodes, top_tri, float(x_pos), float(y_pos), q0, r0, gaussian_beta
@@ -701,7 +890,10 @@ def solve_thermal_3d(
         temperature = np.asarray(T_iter, dtype=float)
 
         if step % max(1, steps // 10) == 0:
-            x_disp = -1.0 if not active_positions else float(active_positions[0][0])
+            if source_mode in line_source_modes and active_lines:
+                x_disp = 0.5 * (float(active_lines[0]["x0"]) + float(active_lines[0]["x1"]))
+            else:
+                x_disp = -1.0 if not active_positions else float(active_positions[0][0])
             print(
                 f"  Thermal step {step:5d}/{steps}, t={t:.2f}s, x={x_disp:.1f}mm, T_max={float(np.max(temperature)):.2f}K"
             )
@@ -748,6 +940,11 @@ def solve_thermal_3d_with_peak(
     dt_max: float | None = None,
     return_history: bool = False,
     track_energy_balance: bool = False,
+    heat_source_mode: str = "moving_gaussian",
+    induction_frequency: float = 10000.0,
+    induction_relative_permeability: float = 100.0,
+    induction_electrical_resistivity: float = 2.5e-7,
+    induction_efficiency: float = 1.0,
 ) -> tuple[np.ndarray, dict[str, float]] | tuple[np.ndarray, dict[str, float], list[np.ndarray], list[float]]:
     """Solve thermal problem and also track global peak temperature over time.
 
@@ -765,6 +962,13 @@ def solve_thermal_3d_with_peak(
     if heat_lines is None:
         heat_lines = _build_heat_lines_from_ys(float(Lx), [float(y) for y in heat_ys])
     heat_lines = _prepare_heat_lines(list(heat_lines))
+    source_mode = str(heat_source_mode).strip().lower()
+    line_source_modes = {"line_gaussian", "induction_skin"}
+    skin_depth = induction_skin_depth_mm(
+        induction_frequency,
+        induction_electrical_resistivity,
+        induction_relative_permeability,
+    )
 
     T_max_global = -np.inf
     t_at = 0.0
@@ -805,8 +1009,18 @@ def solve_thermal_3d_with_peak(
                 heat_mode=str(heat_mode),
                 pass_gap=float(pass_gap),
             )
+            active_lines: list[dict[str, float]] = []
+            if source_mode in line_source_modes:
+                active_lines = _active_heat_lines_at_time(
+                    t=float(t),
+                    velocity=float(velocity),
+                    heat_lines=heat_lines,
+                    heat_mode=str(heat_mode),
+                    pass_gap=float(pass_gap),
+                )
             dt_step = float(dt_min if dt_min is not None else dt)
-            if not active_positions:
+            is_active = bool(active_lines) if source_mode in line_source_modes else bool(active_positions)
+            if not is_active:
                 dt_step = float(dt_max if dt_max is not None else dt_step)
         else:
             if step >= int(steps):
@@ -819,6 +1033,15 @@ def solve_thermal_3d_with_peak(
                 heat_mode=str(heat_mode),
                 pass_gap=float(pass_gap),
             )
+            active_lines = []
+            if source_mode in line_source_modes:
+                active_lines = _active_heat_lines_at_time(
+                    t=float(t),
+                    velocity=float(velocity),
+                    heat_lines=heat_lines,
+                    heat_mode=str(heat_mode),
+                    pass_gap=float(pass_gap),
+                )
         # Optional uniform quench phase (stronger convection / different ambient)
         h_conv_top_step = float(h_conv_top)
         h_conv_bottom_step = float(h_conv_bottom)
@@ -892,7 +1115,25 @@ def solve_thermal_3d_with_peak(
             solver = spla.factorized(A.tocsc())
 
             rhs = (M / dt_step) * temperature + rhs_b
-            if active_positions:
+            if source_mode == "line_gaussian":
+                for ln in active_lines:
+                    rhs += assemble_line_gaussian_flux_on_triangles(
+                        nodes, top_tri, ln, q0, r0, gaussian_beta
+                    )
+            elif source_mode == "induction_skin":
+                for ln in active_lines:
+                    rhs += assemble_induction_skin_source_on_tets(
+                        nodes,
+                        tet,
+                        ln,
+                        q0,
+                        r0,
+                        gaussian_beta,
+                        thickness=float(np.max(nodes[:, 2]) - np.min(nodes[:, 2])),
+                        skin_depth_mm=skin_depth,
+                        efficiency=induction_efficiency,
+                    )
+            elif active_positions:
                 for x_pos, y_pos in active_positions:
                     rhs += assemble_gaussian_flux_on_triangles(
                         nodes, top_tri, float(x_pos), float(y_pos), q0, r0, gaussian_beta
@@ -904,7 +1145,33 @@ def solve_thermal_3d_with_peak(
         if track_energy_balance:
             # Heat input (Gaussian surface flux): total power is the sum of the assembled nodal flux vector.
             heat_power_W = 0.0
-            if active_positions:
+            if source_mode == "line_gaussian":
+                for ln in active_lines:
+                    heat_power_W += float(
+                        np.sum(
+                            assemble_line_gaussian_flux_on_triangles(
+                                nodes, top_tri, ln, q0, r0, gaussian_beta
+                            )
+                        )
+                    )
+            elif source_mode == "induction_skin":
+                for ln in active_lines:
+                    heat_power_W += float(
+                        np.sum(
+                            assemble_induction_skin_source_on_tets(
+                                nodes,
+                                tet,
+                                ln,
+                                q0,
+                                r0,
+                                gaussian_beta,
+                                thickness=float(np.max(nodes[:, 2]) - np.min(nodes[:, 2])),
+                                skin_depth_mm=skin_depth,
+                                efficiency=induction_efficiency,
+                            )
+                        )
+                    )
+            elif active_positions:
                 for x_pos, y_pos in active_positions:
                     heat_power_W += float(
                         np.sum(
@@ -944,7 +1211,10 @@ def solve_thermal_3d_with_peak(
         if step_max > float(T_max_global):
             T_max_global = step_max
             t_at = float(t)
-            if active_positions:
+            if source_mode in line_source_modes and active_lines:
+                x_src_at = 0.5 * (float(active_lines[0]["x0"]) + float(active_lines[0]["x1"]))
+                y_src_at = 0.5 * (float(active_lines[0]["y0"]) + float(active_lines[0]["y1"]))
+            elif active_positions:
                 x_src_at = float(active_positions[0][0])
                 y_src_at = float(active_positions[0][1])
             idx_at = step_idx
@@ -954,7 +1224,10 @@ def solve_thermal_3d_with_peak(
             times_history.append(float(t))
 
         if float(t) >= next_log:
-            x_disp = -1.0 if not active_positions else float(active_positions[0][0])
+            if source_mode in line_source_modes and active_lines:
+                x_disp = 0.5 * (float(active_lines[0]["x0"]) + float(active_lines[0]["x1"]))
+            else:
+                x_disp = -1.0 if not active_positions else float(active_positions[0][0])
             if adaptive_dt:
                 print(
                     f"  Thermal step {step:5d}, t={t:.2f}s, dt={dt_step:.3g}s, x={x_disp:.1f}mm, T_max={float(np.max(temperature)):.2f}K"
@@ -978,6 +1251,7 @@ def solve_thermal_3d_with_peak(
         "x_at_T_max_global": float(xyz[0]),
         "y_at_T_max_global": float(xyz[1]),
         "z_at_T_max_global": float(xyz[2]),
+        "induction_skin_depth_mm": float(skin_depth) if source_mode == "induction_skin" else 0.0,
     }
 
     if track_energy_balance:
@@ -1734,6 +2008,37 @@ def main() -> None:
         help="Heating mode: simultaneous (all lines at once) or sequential (multi-pass, one line after another).",
     )
     parser.add_argument(
+        "--heat-source-mode",
+        type=str,
+        default="moving_gaussian",
+        choices=["moving_gaussian", "line_gaussian", "induction_skin"],
+        help=(
+            "Heat source model: moving_gaussian scans a localized source along each line; "
+            "line_gaussian applies a stationary Gaussian band along each active full line "
+            "(induction-style heating); induction_skin applies a volumetric skin-depth "
+            "Joule heat source below the active full line."
+        ),
+    )
+    parser.add_argument("--induction-frequency", type=float, default=10000.0, help="induction frequency (Hz)")
+    parser.add_argument(
+        "--induction-relative-permeability",
+        type=float,
+        default=100.0,
+        help="relative magnetic permeability used for skin-depth estimate",
+    )
+    parser.add_argument(
+        "--induction-electrical-resistivity",
+        type=float,
+        default=2.5e-7,
+        help="electrical resistivity for skin-depth estimate (ohm m)",
+    )
+    parser.add_argument(
+        "--induction-efficiency",
+        type=float,
+        default=1.0,
+        help="absorbed fraction applied to q0 for induction_skin source",
+    )
+    parser.add_argument(
         "--pass-repeats",
         type=int,
         default=1,
@@ -1937,6 +2242,7 @@ def main() -> None:
     else:
         print(f"Heating line(s): {len(heat_lines)} segments")
     print(f"BC: {args.bc}")
+    print(f"Heat source: {args.heat_source_mode}")
 
     print("\nStep 1: Meshing...")
     nodes, tet, top_nodes, bottom_nodes, top_tri, bottom_tri = build_plate_mesh_3d(
@@ -2009,7 +2315,8 @@ def main() -> None:
         tol = float(args.target_Tmax_tol)
         print(f"  Auto-tuning q0 to target peak ~{target:.1f}K (tol {tol:.1f}K)")
 
-        for it in range(max(1, int(args.target_Tmax_iters))):
+        max_tune_iters = max(1, int(args.target_Tmax_iters))
+        for it in range(max_tune_iters):
             temperature, thermal_peak = solve_thermal_3d_with_peak(
                 nodes=nodes,
                 tet=tet,
@@ -2047,12 +2354,19 @@ def main() -> None:
                 dt_min=args.dt_min,
                 dt_max=args.dt_max,
                 track_energy_balance=bool(args.energy_balance),
+                heat_source_mode=str(args.heat_source_mode),
+                induction_frequency=float(args.induction_frequency),
+                induction_relative_permeability=float(args.induction_relative_permeability),
+                induction_electrical_resistivity=float(args.induction_electrical_resistivity),
+                induction_efficiency=float(args.induction_efficiency),
             )
 
             peak = float(thermal_peak["T_max_global"])
             err = peak - target
             print(f"    tune iter {it+1}: q0={q0_used:.6g}, peak={peak:.2f}K, err={err:+.2f}K")
             if abs(err) <= tol:
+                break
+            if it == max_tune_iters - 1:
                 break
 
             # Scale q0 assuming approximately linear response in (T_peak - T_ref)
@@ -2103,6 +2417,11 @@ def main() -> None:
                 dt_max=args.dt_max,
                 return_history=True,
                 track_energy_balance=bool(args.energy_balance),
+                heat_source_mode=str(args.heat_source_mode),
+                induction_frequency=float(args.induction_frequency),
+                induction_relative_permeability=float(args.induction_relative_permeability),
+                induction_electrical_resistivity=float(args.induction_electrical_resistivity),
+                induction_efficiency=float(args.induction_efficiency),
             )
     else:
         if args.use_elastoplastic and args.strong_coupling:
@@ -2144,6 +2463,11 @@ def main() -> None:
                 dt_max=args.dt_max,
                 return_history=True,
                 track_energy_balance=bool(args.energy_balance),
+                heat_source_mode=str(args.heat_source_mode),
+                induction_frequency=float(args.induction_frequency),
+                induction_relative_permeability=float(args.induction_relative_permeability),
+                induction_electrical_resistivity=float(args.induction_electrical_resistivity),
+                induction_efficiency=float(args.induction_efficiency),
             )
         else:
             temperature, thermal_peak = solve_thermal_3d_with_peak(
@@ -2183,6 +2507,11 @@ def main() -> None:
                 dt_min=args.dt_min,
                 dt_max=args.dt_max,
                 track_energy_balance=bool(args.energy_balance),
+                heat_source_mode=str(args.heat_source_mode),
+                induction_frequency=float(args.induction_frequency),
+                induction_relative_permeability=float(args.induction_relative_permeability),
+                induction_electrical_resistivity=float(args.induction_electrical_resistivity),
+                induction_efficiency=float(args.induction_efficiency),
             )
 
     assert temperature is not None
@@ -2193,6 +2522,8 @@ def main() -> None:
     if args.strong_coupling and not args.use_elastoplastic:
         print("  Note: strong_coupling is only applied with elastoplastic mode; using single-step elasticity.")
     eps_inherent = None
+    epsp_state = None
+    epbar_state = None
     if args.use_elastoplastic and args.use_inherent:
         print("  Note: use_elastoplastic overrides use_inherent; ignoring inherent strain.")
     if (not args.use_elastoplastic) and args.use_inherent and args.eps0 != 0.0:
@@ -2228,7 +2559,47 @@ def main() -> None:
         nu_elem = _interp_table(t_elem, nu_table)
         alpha_elem = _interp_table(t_elem, alpha_table)
 
-    if args.use_elastoplastic:
+    if args.use_elastoplastic and args.strong_coupling:
+        if temps_history is None:
+            raise RuntimeError("Strong coupling requested but thermal history is missing")
+        u_prev = None
+        for T_step in temps_history:
+            if E_table is None or nu_table is None or alpha_table is None:
+                n_elem = int(tet.shape[0])
+                E_elem_step = np.full(n_elem, float(args.E), dtype=float)
+                nu_elem_step = np.full(n_elem, float(args.nu), dtype=float)
+                alpha_elem_step = np.full(n_elem, float(args.alpha), dtype=float)
+            else:
+                tet_nodes = tet.reshape(-1, 4)
+                t_elem = 0.25 * (T_step[tet_nodes[:, 0]] + T_step[tet_nodes[:, 1]] +
+                                 T_step[tet_nodes[:, 2]] + T_step[tet_nodes[:, 3]])
+                E_elem_step = _interp_table(t_elem, E_table)
+                nu_elem_step = _interp_table(t_elem, nu_table)
+                alpha_elem_step = _interp_table(t_elem, alpha_table)
+
+            displacement, epsp_state, epbar_state = solve_mechanics_3d_elastoplastic(
+                nodes,
+                tet,
+                T_step,
+                bottom_nodes,
+                args.Lx,
+                args.Ly,
+                args.thickness,
+                args.bc,
+                args.T_ref,
+                E_elem=E_elem_step,
+                nu_elem=nu_elem_step,
+                alpha_elem=alpha_elem_step,
+                sigma_y0=args.sigma_y0,
+                H_iso=args.hardening_H,
+                max_iters=args.coupling_mech_iters,
+                tol=args.plastic_tol,
+                u_prev=u_prev,
+                epsp_state=epsp_state,
+                epbar_state=epbar_state,
+            )
+            u_prev = displacement
+    elif args.use_elastoplastic:
         if E_elem is None or nu_elem is None or alpha_elem is None:
             n_elem = int(tet.shape[0])
             E_elem = np.full(n_elem, float(args.E), dtype=float)
@@ -2254,92 +2625,24 @@ def main() -> None:
             tol=args.plastic_tol,
         )
     else:
-        if args.use_elastoplastic and args.strong_coupling:
-            if temps_history is None:
-                raise RuntimeError("Strong coupling requested but thermal history is missing")
-            u_prev = None
-            epsp_state = None
-            epbar_state = None
-            for T_step in temps_history:
-                if E_table is None or nu_table is None or alpha_table is None:
-                    n_elem = int(tet.shape[0])
-                    E_elem_step = np.full(n_elem, float(args.E), dtype=float)
-                    nu_elem_step = np.full(n_elem, float(args.nu), dtype=float)
-                    alpha_elem_step = np.full(n_elem, float(args.alpha), dtype=float)
-                else:
-                    tet_nodes = tet.reshape(-1, 4)
-                    t_elem = 0.25 * (T_step[tet_nodes[:, 0]] + T_step[tet_nodes[:, 1]] +
-                                     T_step[tet_nodes[:, 2]] + T_step[tet_nodes[:, 3]])
-                    E_elem_step = _interp_table(t_elem, E_table)
-                    nu_elem_step = _interp_table(t_elem, nu_table)
-                    alpha_elem_step = _interp_table(t_elem, alpha_table)
-
-                displacement, epsp_state, epbar_state = solve_mechanics_3d_elastoplastic(
-                    nodes,
-                    tet,
-                    T_step,
-                    bottom_nodes,
-                    args.Lx,
-                    args.Ly,
-                    args.thickness,
-                    args.bc,
-                    args.T_ref,
-                    E_elem=E_elem_step,
-                    nu_elem=nu_elem_step,
-                    alpha_elem=alpha_elem_step,
-                    sigma_y0=args.sigma_y0,
-                    H_iso=args.hardening_H,
-                    max_iters=args.coupling_mech_iters,
-                    tol=args.plastic_tol,
-                    u_prev=u_prev,
-                    epsp_state=epsp_state,
-                    epbar_state=epbar_state,
-                )
-                u_prev = displacement
-        elif args.use_elastoplastic:
-            if E_elem is None or nu_elem is None or alpha_elem is None:
-                n_elem = int(tet.shape[0])
-                E_elem = np.full(n_elem, float(args.E), dtype=float)
-                nu_elem = np.full(n_elem, float(args.nu), dtype=float)
-                alpha_elem = np.full(n_elem, float(args.alpha), dtype=float)
-
-            displacement, _, _ = solve_mechanics_3d_elastoplastic(
-                nodes,
-                tet,
-                temperature,
-                bottom_nodes,
-                args.Lx,
-                args.Ly,
-                args.thickness,
-                args.bc,
-                args.T_ref,
-                E_elem=E_elem,
-                nu_elem=nu_elem,
-                alpha_elem=alpha_elem,
-                sigma_y0=args.sigma_y0,
-                H_iso=args.hardening_H,
-                max_iters=args.plastic_iters,
-                tol=args.plastic_tol,
-            )
-        else:
-            displacement = solve_mechanics_3d(
-                nodes,
-                tet,
-                temperature,
-                bottom_nodes,
-                args.Lx,
-                args.Ly,
-                args.thickness,
-                args.bc,
-                args.E,
-                args.nu,
-                args.alpha,
-                args.T_ref,
-                E_elem=E_elem,
-                nu_elem=nu_elem,
-                alpha_elem=alpha_elem,
-                eps_inherent=eps_inherent,
-            )
+        displacement = solve_mechanics_3d(
+            nodes,
+            tet,
+            temperature,
+            bottom_nodes,
+            args.Lx,
+            args.Ly,
+            args.thickness,
+            args.bc,
+            args.E,
+            args.nu,
+            args.alpha,
+            args.T_ref,
+            E_elem=E_elem,
+            nu_elem=nu_elem,
+            alpha_elem=alpha_elem,
+            eps_inherent=eps_inherent,
+        )
     w = -displacement[:, 2]
     print(f"  w range (negative = downward): [{float(np.min(w)):.6g}, {float(np.max(w)):.6g}] mm")
 
@@ -2388,6 +2691,11 @@ def main() -> None:
             "r0": float(args.r0),
             "velocity": float(args.velocity),
             "heat_mode": str(args.heat_mode),
+            "heat_source_mode": str(args.heat_source_mode),
+            "induction_frequency_Hz": float(args.induction_frequency),
+            "induction_relative_permeability": float(args.induction_relative_permeability),
+            "induction_electrical_resistivity_ohm_m": float(args.induction_electrical_resistivity),
+            "induction_efficiency": float(args.induction_efficiency),
             "pass_gap": float(args.pass_gap),
             "pass_repeats": float(args.pass_repeats),
             "heat_y": (None if not heat_ys else float(heat_ys[0])),
@@ -2461,6 +2769,18 @@ def main() -> None:
             "y_w_max": float(wmax_xyz[1]),
             "z_w_max": float(wmax_xyz[2]),
             **camber,
+            **(
+                {
+                    "plastic_epbar_min": float(np.min(epbar_state)),
+                    "plastic_epbar_max": float(np.max(epbar_state)),
+                    "plastic_epbar_mean": float(np.mean(epbar_state)),
+                    "plastic_epbar_p95": float(np.percentile(epbar_state, 95.0)),
+                    "plastic_elements_active": float(np.count_nonzero(np.asarray(epbar_state) > 0.0)),
+                    "plastic_elements_total": float(np.asarray(epbar_state).size),
+                }
+                if epbar_state is not None
+                else {}
+            ),
         },
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

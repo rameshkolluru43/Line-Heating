@@ -1,16 +1,60 @@
 \section{Discussion}
 \label{sec:discussion}
 
-The Li2023 validation shows that the 3D thermo-mechanical workflow, combined with the calibrated inherent-strain surrogate, reproduces midspan residual deflection to within \SI{2}{\%} for the four benchmark conditions. Errors do not show a strong monotonic trend with speed, thickness, or energy in this small set; a broader parameter sweep would be needed for sensitivity analysis.
+The Li2023 validation demonstrates that the 3D thermo-mechanical workflow, with the calibrated inherent-strain surrogate, reproduces midspan residual deflection across eleven published Table~2 cases with MAPE \SI{1.17}{\%} and maximum error \SI{2.78}{\%} (Case~5). On the four-case calibration subset (1, 6, 87, 90), MAPE is \SI{0.52}{\%}; on the seven non-anchor validation cases, MAPE is \SI{1.55}{\%}. This split is important because the calibration anchors are expected to be more accurate than the independent interpolation cases.
 
-For the keel-plate demonstrations, deflection amplitude increases with heating intensity and pass count. The Li2023-scaled sequential case achieves substantial deflection with higher peak temperature and longer process time. Some early runs use mixed temperature units; a thermal-unit audit is planned.
+\paragraph{Speed-sweep behavior (Cases 1--5)}
+Experiments show decreasing deflection as torch speed increases at fixed $E=\SI{600}{J/mm}$ ($w_{\mathrm{exp}}$ from \SI{5.785}{mm} to \SI{5.727}{mm}). Predictions cluster near \SI{5.89}{mm} because the current $\varepsilon_0$ law uses $b=0$ (no explicit velocity exponent) and the same $\varepsilon_0=0.072$ for all single-pass 600\,J/mm cases. Improving this trend requires either a nonzero velocity exponent in the inherent-strain law or a coupled elastoplastic model.
+
+\paragraph{Velocity-dependent inherent-strain calibration}
+A post-validation velocity correction was fit from Li2023 Cases~1--7 using the archived v9 results. With all other terms fixed, the fitted multiplicative form is
+\begin{equation}
+\varepsilon_{0,\mathrm{new}} =
+\varepsilon_{0,\mathrm{old}}\,
+C_v\left(\frac{v_{\mathrm{ref}}}{v}\right)^{b_v},
+\end{equation}
+where $v_{\mathrm{ref}}=\SI{6}{mm/s}$, $C_v=0.976$, and $b_v=-0.0206$. This correction reduces the Cases~1--7 MAPE from \SI{1.67}{\%} to \SI{0.71}{\%}, and reduces maximum absolute error from \SI{2.78}{\%} to \SI{1.37}{\%}. The fitted exponent is small, confirming that velocity dependence is a secondary correction relative to energy, pass count, and thickness for this subset.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.72\linewidth]{velocity_dependent_eps0_calibration.png}
+\caption{Velocity-dependent inherent-strain correction fit from Li2023 Cases~1--7. The correction improves the speed-sweep trend while retaining the validated forward FEM results as the baseline.}
+\label{fig:velocity-eps0-calibration}
+\end{figure}
+
+\paragraph{Multi-pass and high-energy cases}
+Cases 6, 7, and 87--90 agree within \SI{0.8}{\%}, indicating that pass-count and energy-dependent terms in the $\varepsilon_0$ model capture the dominant process effects outside the low-speed single-pass band.
+
+\paragraph{Induction-style heating and quench}
+The induction-style line-source experiments isolate the role of pass scheduling. With quenching enabled and a single collapsed full-line event (v10), single-pass cases remain accurate but two-pass cases are underpredicted by approximately \SI{50}{\%}. This shows that matching peak temperature or total heating duration is not sufficient for multi-pass forming. When the same line source is repeated sequentially (v11), cases 6, 7, and 87--89 recover the Li2023 deflections with MAPE \SI{0.27}{\%}. The induction approximation is therefore usable for this benchmark when the physical pass sequence is retained.
+
+\paragraph{Keel-plate demonstrations}
+Deflection amplitude increases with heating intensity and pass count. The Li2023-scaled sequential case achieves substantial deflection with higher peak temperature. Keel-plate results are treated as workflow demonstrations rather than validation, because no measured target shape is available in this dataset. Early keel runs with inconsistent $T_{\max}$ values remain excluded from the main quantitative claims until thermal-unit normalization is complete.
+
+\paragraph{Thermal-unit audit and verification scaffold}
+A thermal-unit audit was executed for the archived keel-plate runs. Three runs pass the audit (\code{keel\_plate\_fast\_parallel}, \code{keel\_plate\_li2023\_scaled}, and \code{keel\_plate\_practical}); two older runs are flagged because the peak temperatures are physically inconsistent for line heating and the convection coefficient is in the wrong unit scale. A verification scaffold was also generated from archived mesh, timestep, heat-source, temperature, and displacement summaries. It reports mesh size, timestep count, peak/final temperature, deflection, and nominal Gaussian line-energy estimates; this is a reporting scaffold, not a closed transient heat-balance integral.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\linewidth]{keel_thermal_unit_audit.png}
+\caption{Thermal-unit audit for archived keel-plate runs. Green bars are thermally consistent archived runs; red bars are older runs excluded from quantitative claims because their peak temperatures and convection units are inconsistent with the validated line-heating setup.}
+\label{fig:keel-thermal-audit}
+\end{figure}
+
+\paragraph{Electromagnetic induction execution}
+The solver now includes an \code{induction\_skin} source that converts absorbed line power into a volumetric Joule-heating field using induction frequency, electrical resistivity, relative permeability, and efficiency. A smoke-test run confirms execution and records a \SI{0.252}{mm} skin depth for $f=\SI{10}{kHz}$, $\rho_e=\SI{2.5e-7}{\ohm\metre}$, and $\mu_r=100$. This advances the previous prescribed-flux approximation to an executable electromagnetic heating model, while a full coil-field Maxwell solve remains outside the present validation set.
+
+\paragraph{Numerical verification spot checks}
+\cref{tab:li2023-mesh-dt-sensitivity} reports a Case~6 mesh/time-step sensitivity matrix. Halving $\Delta t$ at the baseline mesh changes $|w|_{\max}$ by only \SI{0.03}{\%}, whereas refining the heating-band mesh from $h_{\mathrm{ref}}=\SI{5}{mm}$ to \SI{2.5}{mm} increases $|w|_{\max}$ by \SI{14.2}{\%}. This indicates that local mesh resolution near the heat path is the dominant discretization factor for the present setting. \cref{tab:li2023-elastoplastic-spotcheck} adds a diagnostic J2 elastoplastic spot check for the same case; it produces localized equivalent plastic strain but much smaller residual deflection than the calibrated inherent-strain response, so it is not treated as a validated replacement for the surrogate.
 
 \paragraph{Limitations}
 \begin{itemize}
-  \item Residual deformation is approximated via inherent strain rather than full elastoplastic integration; the surrogate is calibrated to Li2023 and may need recalibration for other geometries or processes.
-  \item Time-series validation (temperature and deflection histories during heating and cooling) is not yet reported; comparison with such data would strengthen validation.
-  \item Mesh and time-step convergence studies and energy-balance checks are recommended for publication-grade numerical verification.
+  \item Table~2 rows 8--86 are unavailable; validation is limited to the eleven published rows.
+  \item Residual deformation uses an inherent-strain surrogate rather than full elastoplastic integration; the Case~6 J2 spot check is diagnostic and does not establish physical equivalence.
+  \item The new induction skin-depth source is an electromagnetic heating approximation; it does not solve the surrounding coil field.
+  \item Time-series validation (temperature and deflection histories) is not yet reported.
+  \item A Case~6 mesh/time-step matrix has been completed, but broader convergence across additional cases and refinement levels remains recommended.
 \end{itemize}
 
 \paragraph{Strengths}
-The workflow is reproducible, supports both forward and inverse use cases, and produces VTK, JSON, and plots suitable for reporting. The C++/Python implementation allows iterative calibration and batch runs across multiple cases.
+The workflow is reproducible (\repoPath{scripts/li2023\_data.py}, \repoPath{scripts/validate\_li2023\_all.py}), supports forward and inverse use cases, and produces VTK, JSON, and plots for batch reporting across all Table~2 cases in the dataset.

@@ -1,0 +1,26 @@
+\section{Inverse Problem: Heating-Plan Identification}
+\label{sec:reverse-problem}
+
+The validated forward workflow maps a prescribed line-heating process to a residual plate shape. The inverse problem asks for a manufacturable heating plan that produces a desired target shape. In this paper, the inverse capability is treated as a planning layer around the forward FEM solver: candidate heating plans are evaluated with the validated thermal--mechanical model, compared with a target camber or curvature metric, and updated until the mismatch is acceptable.
+
+\subsection{Problem Statement}
+Let $w^{\star}(y)$ denote a target transverse camber profile and let $w(y;\mathbf{p})$ denote the camber predicted by the forward solver for a process vector $\mathbf{p}$. A compact parameterization is
+\begin{equation}
+\mathbf{p} = \{y_1,\ldots,y_n,\ E,\ v,\ N,\ s\},
+\end{equation}
+where $y_i$ are heating-line positions, $E$ is line energy, $v$ is travel speed, $N$ is the number of repeated passes, and $s$ denotes the pass schedule. A representative least-squares objective is
+\begin{equation}
+J(\mathbf{p}) = \frac{1}{m}\sum_{j=1}^{m}\left[w(y_j;\mathbf{p}) - w^{\star}(y_j)\right]^2 + R(\mathbf{p}),
+\end{equation}
+where $R(\mathbf{p})$ penalizes impractical plans (e.g., excessive energy, too many passes, or line locations outside the manufacturable region).
+
+\subsection{Solution Procedure}
+The inverse workflow is solved by repeated calls to the same forward model used for validation. The planning loop used in this project is summarized in \cref{fig:inverse-planning-flow}.
+
+In the current implementation, \repoPath{scripts/plan_line_heating.py} optimizes line positions together with shared values of $E$, $v$, and $N$ across all lines, then writes a heating-plan configuration. Extending the interface to independent per-line parameters is a natural next step for more complex forming plans.
+
+\subsection{Relationship to Forward Validation}
+The inverse problem is not an independent physics model. Its accuracy is bounded by the fidelity of the forward thermal model and the inherent-strain calibration. The Li2023 benchmark therefore supports inverse planning by establishing that the forward model reproduces measured line-heating deflections over the tested process range.
+
+\subsection{Demonstration Status}
+The present manuscript includes the inverse workflow definition and planning flowchart but does not report an independent inverse benchmark with measured target curvature. A publication-grade inverse study requires (i) a measured target camber/curvature profile, (ii) explicit manufacturing constraints, and (iii) verification that the inferred plan reproduces the target under the validated forward model.

@@ -4,7 +4,97 @@
 \subsection{Li et al.\ (2023) Benchmark Cases}
 Validation uses experimental data from Li et al.\ \cite{li2023} Table~2 (Q345 steel; Table~1 properties in \cref{sec:methods}). The inherent-strain amplitude $\varepsilon_0$ is calibrated on four anchor cases (1, 6, 87, 90) and applied without re-fitting to all published Table~2 rows available in our dataset: cases 1--7 and 87--90 (rows 8--86 are omitted in the source excerpt). We therefore report calibration-anchor, non-anchor validation, and all-case metrics separately.
 
-\Cref{tab:li2023-exp} lists experimental conditions. \Cref{tab:li2023-all} reports predicted vs.\ experimental midspan residual deflection for all eleven FEM runs in the moving-torch baseline (tag \code{v9\_table2\_extended}). \Cref{tab:li2023-cal} highlights the calibration subset. A later process comparison, \cref{tab:li2023-process}, evaluates induction-style line heating with quenching.
+\Cref{tab:li2023-exp} lists experimental conditions. \Cref{tab:li2023-all} reports predicted vs.\ experimental midspan residual deflection for all eleven simulations in the moving-torch baseline. \Cref{tab:li2023-cal} highlights the calibration subset. A later process comparison, \cref{tab:li2023-process}, evaluates a full-line heat-source approximation with quenching.
+
+% --- Flowchart styling (shared with publication/sections/flowcharts.tex) ---
+\tikzset{
+  block/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=black!70,
+    fill=blue!7,
+    align=center,
+    minimum height=9mm,
+    text width=36mm,
+    font=\small
+  },
+  wideblock/.style={
+    block,
+    text width=52mm
+  },
+  smallblock/.style={
+    block,
+    text width=29mm,
+    font=\footnotesize
+  },
+  decision/.style={
+    diamond,
+    aspect=2.1,
+    draw=black!70,
+    fill=orange!12,
+    align=center,
+    inner sep=1.5pt,
+    text width=26mm,
+    font=\small
+  },
+  group/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=black!40,
+    fill=gray!5,
+    inner sep=7pt
+  },
+  arrow/.style={
+    -{Latex[length=2.4mm]},
+    thick,
+    draw=black!75
+  },
+  dashedarrow/.style={
+    arrow,
+    dashed,
+    draw=black!55
+  },
+  note/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=black!45,
+    fill=yellow!10,
+    align=left,
+    text width=130mm,
+    font=\small
+  }
+}
+
+\begin{figure}[H]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[node distance=11mm and 13mm]
+  \node[wideblock] (data) {Li et al.\ 2023\\Table~1 material + Table~2 cases};
+
+  \node[wideblock, below left=17mm and 10mm of data] (v9) {v9 torch baseline\\moving Gaussian\\sequential passes};
+  \node[wideblock, below=17mm of data] (v10) {v10 full-line flux\\collapsed multi-pass + quench};
+  \node[wideblock, below right=17mm and 10mm of data] (v11) {v11 full-line flux\\sequential passes + quench};
+
+  \node[wideblock, below=of v9] (r9) {All 11 Li2023 cases\\about 1.2\% MAPE\\primary baseline};
+  \node[wideblock, below=of v10] (r10) {Multi-pass cases\\about $-$50\% bias\\schedule collapsed};
+  \node[wideblock, below=of v11] (r11) {Cases 6, 7, 87--89\\about 0.3\% MAPE\\schedule preserved};
+
+  \node[wideblock, below=20mm of r10] (paper) {Validation metrics, figures, discussion\\manuscript};
+
+  \draw[arrow] (data) -- (v9);
+  \draw[arrow] (data) -- (v10);
+  \draw[arrow] (data) -- (v11);
+  \draw[arrow] (v9) -- (r9);
+  \draw[arrow] (v10) -- (r10);
+  \draw[arrow] (v11) -- (r11);
+  \draw[arrow] (r9) -- (paper);
+  \draw[arrow] (r10) -- (paper);
+  \draw[arrow] (r11) -- (paper);
+\end{tikzpicture}%
+}
+\caption{Validation workflow for Li et al.\ (2023) cases and the full-line thermal-flux process comparison variants.}
+\label{fig:li2023-validation-flow}
+\end{figure}
 
 \begin{table}[H]
 \centering
@@ -36,6 +126,7 @@ Case & $v$ (mm/s) & $E$ (J/mm) & $t$ (mm) & Passes & $w_{\mathrm{exp}}$ (mm) \\
 \caption{Full Li2023 validation: predicted vs.\ experimental deflection (all eleven published cases).}
 \label{tab:li2023-all}
 \footnotesize
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{rrrrrrrrr}
 \toprule
 Case & $v$ & $E$ & $t$ & $w_{\mathrm{exp}}$ & $w_{\mathrm{pred}}$ & $\Delta w$ & $\Delta w/w_{\mathrm{exp}}$ (\%) & $T_{\mathrm{peak}}$ (K) \\
@@ -54,6 +145,7 @@ Case & $v$ & $E$ & $t$ & $w_{\mathrm{exp}}$ & $w_{\mathrm{pred}}$ & $\Delta w$ &
 90 & 15 & 1000 & 10 & 11.322 & 11.319 & $-$0.003 & $-$0.03 & 1376 \\
 \bottomrule
 \end{tabular}
+}
 \end{table}
 
 \noindent Across all eleven cases: mean $|\Delta w|=\SI{0.077}{mm}$, RMSE $=\SI{0.094}{mm}$, bias $=\SI{0.073}{mm}$, MAPE $=\SI{1.17}{\%}$, and maximum $|\Delta w/w_{\mathrm{exp}}|=\SI{2.78}{\%}$ (Case~5). Multi-pass and high-energy cases (6, 7, 87--90) agree within \SI{0.8}{\%}. Single-pass speed-sweep cases (1--5) show a systematic overprediction and weak sensitivity to $v$ in $w_{\mathrm{pred}}$ (discussed in \cref{sec:discussion}).
@@ -93,30 +185,33 @@ Refined mesh + time step & 1.0 & 1174.9 & 8.819 \\
 \end{tabular}
 \end{table}
 
-\noindent Halving the time step at the baseline mesh changes $|w|_{\max}$ by only \SI{0.03}{\%} and $T_{\mathrm{peak}}$ by \SI{0.65}{\%}. Refining the heating-band mesh from $h_{\mathrm{ref}}=\SI{5}{mm}$ to \SI{2.5}{mm} increases $|w|_{\max}$ by \SI{14.2}{\%} while leaving $T_{\mathrm{peak}}$ within \SI{0.3}{\%} of the baseline. The combined refined mesh and time-step run differs from the refined-mesh-only result by less than \SI{0.01}{\%} in $|w|_{\max}$, indicating that local mesh resolution near the heat path is the dominant discretization factor for this case.
+\noindent Halving the time step at the baseline mesh changes $|w|_{\max}$ by only \SI{0.03}{\%} and $T_{\mathrm{peak}}$ by \SI{0.65}{\%}. Refining the heating-band mesh from $h_{\mathrm{ref}}=\SI{5}{mm}$ to \SI{2.5}{mm} increases $|w|_{\max}$ by \SI{14.2}{\%} while leaving $T_{\mathrm{peak}}$ within \SI{0.3}{\%} of the baseline. The combined refined mesh and time-step run differs from the refined-mesh-only result by less than \SI{0.01}{\%} in $|w|_{\max}$, so the present sensitivity matrix indicates that local mesh resolution near the heat path is the dominant discretization factor for this case.
 
 \begin{table}[H]
 \centering
 \caption{Diagnostic comparison between the calibrated inherent-strain surrogate and the optional J2 elastoplastic mechanics path for representative Li2023 Case~6 ($v=\SI{11}{mm/s}$, $E=\SI{600}{J/mm}$, $t=\SI{14}{mm}$, two passes).}
 \label{tab:li2023-elastoplastic-spotcheck}
 \small
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{lrrl}
 \toprule
 Model & $|w|_{\max}$ (mm) & $T_{\mathrm{peak}}$ (K) & Plasticity indicator \\
 \midrule
-Inherent strain (calibrated) & 7.722 & 1176.9 & $\varepsilon_0=4.7736\times 10^{-2}$; no resolved plastic-strain field \\
+Inherent strain (calibrated) & 7.722 & 1176.9 & $\varepsilon_0=4.7736\times 10^{-2}$ surrogate amplitude; no resolved plastic-strain field \\
 Elastoplastic (J2, strong-coupled) & 0.096 & 1176.9 & $\bar{\varepsilon}^{p}_{\max}=5.8846\times 10^{-2}$; mean $4.3067\times 10^{-4}$; active elements 5342/36780 (14.5\%) \\
 \bottomrule
 \end{tabular}
+}
 \end{table}
 
-\noindent The J2 run advances equivalent plastic strain through the saved thermal history using the same mesh and thermal loading as the calibrated Case~6 run. It confirms localized yielding, but the optional elastoplastic path does not reproduce the calibrated residual-deflection magnitude. The comparison is therefore retained as a diagnostic verification item rather than treated as independent validation of the inherent-strain calibration.
+\noindent The J2 run advances equivalent plastic strain through the saved thermal history using the same mesh and thermal loading as the calibrated Case~6 run. It confirms that the thermal cycle can trigger localized yielding, but the present optional elastoplastic path does not reproduce the calibrated residual-deflection magnitude. The comparison is therefore retained as a diagnostic verification item rather than treated as independent validation of the inherent-strain calibration.
 
 \begin{table}[H]
 \centering
 \caption{Summary validation metrics. MAE, RMSE, and bias are in mm; MAPE and maximum error are percentages.}
 \label{tab:validation-metrics}
 \small
+\resizebox{\linewidth}{!}{%
 \begin{tabular}{lrrrrrr}
 \toprule
 Run / split & $n$ & MAE & RMSE & Bias & MAPE & Max $|\%|$ \\
@@ -128,6 +223,7 @@ v10 line source, collapsed + quench & 11 & 2.578 & 3.862 & $-$2.468 & 23.56 & 50
 v11 line source, sequential + quench & 5 & 0.034 & 0.045 & 0.020 & 0.27 & 0.66 \\
 \bottomrule
 \end{tabular}
+}
 \end{table}
 
 \Cref{fig:li2023-parity,fig:li2023-residuals,fig:li2023-speed-line} visualize the moving-torch validation. Calibration anchors are marked separately from non-anchor validation cases to make the fitted cases explicit.
@@ -153,14 +249,14 @@ v11 line source, sequential + quench & 5 & 0.034 & 0.045 & 0.020 & 0.27 & 0.66 \
 \label{fig:li2023-speed-line}
 \end{figure}
 
-\subsection{Induction-Style Line Heating and Quench Comparison}
+\subsection{Full-Line Thermal-Flux and Quench Comparison}
 \label{sec:validation-induction}
 
-Two induction-style variants were run to test whether a full-line heat source can replace the moving torch. The first, \code{v10\_induction\_simul\_quench}, uses \code{heat\_source\_mode=line\_gaussian}, quenching, and a collapsed multi-pass representation: $v_{\mathrm{eff}}=v/N$ with one full-line heating event. The second, \code{v11\_induction\_seq\_quench}, uses the same line source and quench model but repeats the line source sequentially for the specified pass count. Thus v11 preserves the separate thermal cycles used by Li2023 multi-pass cases.
+Two full-line thermal-flux variants were run to test whether a reduced line-source approximation can reproduce the moving-torch forming response. The first applies a single full-line heating event with quenching and collapses an $N$-pass plan into one longer event using an effective velocity $v_{\mathrm{eff}}=v/N$. The second repeats the same full-line heating event sequentially for the specified pass count while retaining quenching. The sequential variant therefore preserves the distinct thermal cycles present in the Li2023 multi-pass experiments. This comparison evaluates process scheduling and heat-input representation only; it is not an electromagnetic validation study.
 
 \begin{table}[H]
 \centering
-\caption{Process comparison for Li2023 cases: moving torch baseline (v9), collapsed induction with quench (v10), and sequential induction with quench (v11). Values are predicted residual deflection in mm with percentage error in parentheses.}
+\caption{Process comparison for Li2023 cases: moving torch baseline (v9), collapsed full-line thermal flux with quench (v10), and sequential full-line thermal flux with quench (v11). Values are predicted residual deflection in mm with percentage error in parentheses.}
 \label{tab:li2023-process}
 \scriptsize
 \resizebox{\textwidth}{!}{%
@@ -185,7 +281,7 @@ Case & $v$ & $E$ & $t$ & $N$ & $w_{\mathrm{exp}}$ & v9 torch & v10 line+quench &
 }
 \end{table}
 
-\noindent The collapsed induction variant (v10) matches single-pass cases but underpredicts multi-pass cases by about \SI{50}{\%}. This is a process-scheduling error: one longer full-line heat does not reproduce two separate thermal cycles and associated inherent-strain accumulation. The sequential induction variant (v11) corrects this for the multi-pass subset (cases 6, 7, 87--89), with MAPE \SI{0.27}{\%}. These results support the induction-style thermal source as a viable process variant when the physical pass schedule is preserved.
+\noindent The collapsed full-line variant (v10) matches single-pass cases but underpredicts multi-pass cases by about \SI{50}{\%}. This is a process-scheduling error: one longer full-line heat does not reproduce two separate thermal cycles and associated inherent-strain accumulation. The sequential full-line variant (v11) corrects this for the multi-pass subset (cases 6, 7, 87--89), with MAPE \SI{0.27}{\%}. These results support the reduced full-line thermal source as a useful process-planning approximation only when the physical pass schedule is preserved.
 
 \begin{figure}[H]
 \centering
@@ -195,21 +291,26 @@ Case & $v$ & $E$ & $t$ & $N$ & $w_{\mathrm{exp}}$ & v9 torch & v10 line+quench &
 \end{figure}
 
 \subsection{Keel-Plate Demonstration Cases}
-\Cref{tab:keel} summarizes keel-plate demonstration runs (from \repoPath{summary.json} in each result folder). These are application demonstrations rather than experimental validation cases. Runs with physically inconsistent peak temperatures from earlier unit-normalization tests are retained in the repository but excluded from the main quantitative table.
+\Cref{tab:keel} summarizes keel-plate demonstration runs (summarized from the per-run output files in the project repository). These are application demonstrations rather than experimental validation cases. Runs with physically inconsistent peak temperatures from earlier unit-normalization tests are retained in the repository but excluded from the main quantitative table.
 
 \begin{table}[H]
 \centering
 \caption{Keel-plate demonstration cases retained for publication discussion: heat mode, passes, peak flux $q_0$, radius $r_0$, peak temperature, and deflection extrema.}
 \label{tab:keel}
-\begin{tabular}{llrrrrll}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.05}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{llrrrrl}
 \toprule
-Case & Heat mode & Passes & $q_0$ (W/mm$^2$) & $r_0$ (mm) & $T_{\max}$ (K) & $w_{\max}$ / $w_{\min}$ (mm) \\
+Case & Heat mode & Passes & $q_0$ (W/mm$^2$) & $r_0$ (mm) & $T_{\max}$ (K) & $w_{\max}/w_{\min}$ (mm) \\
 \midrule
-Keel\_fast\_parallel & simultaneous & 1 & 59.05 & 9.0 & 1173.0 & 0.003 / $-0.044$ \\
-Keel\_practical      & simultaneous & 1 & 96.99 & 9.0 & 1171.7 & 8.32 / $-1.95$ \\
-Keel\_li2023\_scaled & sequential   & 2 & 55.42  & 7.0 & 1476.0 & 20.8 / $-7.96$ \\
+Keel\_fast\_parallel & simultaneous & 1 & 59.05 & 9.0 & 1173.0 & 0.003/$-0.044$ \\
+Keel\_practical      & simultaneous & 1 & 96.99 & 9.0 & 1171.7 & 8.32/$-1.95$ \\
+Keel\_li2023\_scaled & sequential   & 2 & 55.42 & 7.0 & 1476.0 & 20.8/$-7.96$ \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
 \end{table}
 
 The demonstration deflection ranges are \SI{0.047}{mm}, \SI{10.27}{mm}, and \SI{28.79}{mm} for the fast-parallel, practical, and Li2023-scaled keel cases, respectively. The keel examples demonstrate the workflow on larger geometry; publication-grade keel validation requires a measured or target curvature profile and a completed thermal-unit audit.

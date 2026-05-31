@@ -1,0 +1,87 @@
+\subsection{IGES-Driven Inverse Keel-Plate Planning}
+\label{sec:iges-inverse}
+
+This subsection describes an inverse-planning use case in which a target keel curvature is extracted from an IGES representation of the hull surface and converted into a practicable line-heating plan for a representative keel-plate segment. The target segment considered here is \SI{3000}{mm}$\times$\SI{1000}{mm}$\times$\SI{49}{mm}.
+
+\paragraph{Target curvature extracted from the CAD surface}
+The curvature analysis of the IGES surface yields a representative target radius of curvature of \SI{11.48}{m} (\SI{11479.59}{mm}), corresponding to a mean curvature magnitude of \SI{0.0871}{1/m}. Over a \SI{1000}{mm} transverse width, this radius implies a camber on the order of \SI{10.9}{mm}. These values define the geometric target for the inverse plan.
+
+\paragraph{Planning workflow}
+\Cref{fig:iges-inverse-flow} summarizes the conversion from CAD-derived curvature to a verified heating plan.
+
+\begin{figure}[H]
+\centering
+\tikzset{
+  igesblock/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=black!70,
+    fill=blue!7,
+    align=center,
+    minimum height=9mm,
+    font=\small,
+    text width=33mm
+  },
+  igesarrow/.style={-{Latex[length=2.4mm]}, thick, draw=black!75}
+}
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[node distance=10mm and 10mm]
+  \node[igesblock] (a) {CAD surface\\(IGES)};
+  \node[igesblock, right=of a] (b) {Extract target\\curvature/camber};
+  \node[igesblock, right=of b] (c) {Select heating\\line pattern};
+  \node[igesblock, right=of c] (d) {Choose process\\parameters};
+  \node[igesblock, right=of d, text width=36mm] (e) {Forward simulation\\and curvature check};
+
+  \draw[igesarrow] (a) -- (b);
+  \draw[igesarrow] (b) -- (c);
+  \draw[igesarrow] (c) -- (d);
+  \draw[igesarrow] (d) -- (e);
+\end{tikzpicture}%
+}
+\caption{IGES-driven inverse-planning workflow from CAD-derived curvature to a forward-verified heating plan.}
+\label{fig:iges-inverse-flow}
+\end{figure}
+
+\paragraph{Representative heating plan}
+A symmetric, five-line longitudinal heating layout was selected for the \SI{3000}{mm}$\times$\SI{1000}{mm} keel-plate segment, with equally spaced lines at \SI{166.67}{mm}, \SI{333.33}{mm}, \SI{500}{mm}, \SI{666.67}{mm}, and \SI{833.33}{mm} from one plate edge. A representative parameter set is summarized in \cref{tab:iges-inverse-params}.
+
+\begin{table}[H]
+\centering
+\caption{Representative IGES-driven keel-plate heating plan used for the reported forward verification.}
+\label{tab:iges-inverse-params}
+\begin{tabular}{p{0.46\linewidth}p{0.48\linewidth}}
+\toprule
+Quantity & Value \\
+\midrule
+Plate segment & \SI{3000}{mm} $\times$ \SI{1000}{mm} $\times$ \SI{49}{mm} \\
+Target radius (from CAD) & \SI{11.48}{m} \\
+Heating-line locations (transverse) & \SI{166.67}{mm}, \SI{333.33}{mm}, \SI{500}{mm},\\ \SI{666.67}{mm}, \SI{833.33}{mm} \\
+Line direction (longitudinal) & \SI{0}{mm} to \SI{3000}{mm} \\
+Peak surface heat flux & \SI{96.99}{W/mm^2} \\
+Travel speed & \SI{10}{mm/s} \\
+Effective Gaussian radius & \SI{9}{mm} \\
+Target peak temperature & \SI{1173.15}{K} \\
+Heating schedule & Simultaneous \\
+Inherent-strain amplitude & 0.025 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Forward verification and results}
+Forward simulation of the representative plan yields an average fitted radius of approximately \SI{12.17}{m} and a residual transverse deflection range of approximately \SI{10.27}{mm}. Relative to the \SI{11.48}{m} CAD-derived target, the verified response captures the correct curvature scale for the \SI{3}{m}$\times$\SI{1}{m} segment.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{inverse_problem_flowchart.png}
+\caption{Inverse-planning loop used in the study: a target shape is matched by iteratively updating a heating plan using repeated forward thermo-mechanical simulations and a mismatch metric.}
+\label{fig:iges-inverse-loop}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.95\linewidth]{inverse_problem_results_panel.png}
+\caption{Illustrative inverse-planning result and forward confirmation for a single-line target: target profile, inferred heating path, selected process variables within the prescribed bounds, and achieved deflection metrics.}
+\label{fig:iges-inverse-demo}
+\end{figure}
+
+These results indicate that CAD-derived curvature targets can be translated into a practicable multi-line heating plan; however, a publication-grade inverse study requires a closed-loop optimization (updating line spacing, energy input, pass count, and scheduling until the target mismatch is minimized) together with validation against measured as-built curvature.
