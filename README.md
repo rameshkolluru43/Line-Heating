@@ -1,308 +1,225 @@
-# Ship Plate Bending — Line Heating (3D)
+# Ship Plate Bending Line Heating
 
-This repo contains a 3D coupled thermo-mechanical finite element workflow for ship-plate line heating.
+This repository contains a 3D finite-element workflow for simulating and planning line-heating operations used in ship-plate forming. It combines a transient thermal solver, thermo-mechanical deformation prediction, validation scripts, inverse planning tools, and a publication-ready manuscript package.
 
-## 🎯 Project Purpose
+The project is designed for two main engineering questions:
 
-This simulation tool supports two primary use cases:
+- **Forward analysis:** given plate geometry, material data, and a heating plan, predict temperature evolution, residual deflection, camber, and curvature.
+- **Inverse planning:** given a target camber or curvature profile, search for heating-line locations and process parameters that reproduce the target shape.
 
-**A) Forward Problem:** Given line heating at a specified torch temperature (e.g., 900K), predict and validate the resulting curvature profile.
+## Current Capabilities
 
-**B) Inverse Problem:** Given a target curvature and plate dimensions, determine the optimal line heating pattern to achieve it.
+- Generate 3D unstructured tetrahedral meshes in Gmsh with local refinement around heating lines.
+- Solve transient 3D heat conduction with moving Gaussian, full-line Gaussian, or reduced skin-depth heat input.
+- Model convection, optional radiation, and quenching through Robin-type boundary terms.
+- Support simultaneous and sequential multi-line or multi-pass heating schedules.
+- Use temperature-dependent Q345 material properties from Li et al. (2023) benchmark data.
+- Solve thermo-mechanical deformation using linear tetrahedral elasticity and thermal strain loads.
+- Represent permanent residual bending through a calibrated inherent-strain surrogate.
+- Optionally run a J2 elastoplastic mechanics path for exploratory studies.
+- Calibrate and validate against Li et al. (2023) line-heating benchmark cases.
+- Run keel-plate demonstration cases with practical multi-line heating schedules.
+- Evaluate forward and inverse line-heating plans through JSON configuration files.
+- Produce VTK fields for ParaView, PNG figures, NumPy arrays, summary JSON, CSV comparisons, and LaTeX/PDF reports.
+- Maintain a self-contained manuscript package in `publication2/` for journal-style presentation.
 
-📖 **See [docs/reference/USE-CASES.md](docs/reference/USE-CASES.md) for detailed workflows and examples**
+## Numerical Method
 
-## ✨ Features
+The solver uses a one-way coupled thermo-mechanical workflow. The transient thermal problem is solved first over the heating and cooling schedule; the resulting temperature field then drives the mechanical deformation solve.
 
-- Gmsh tetrahedral mesh (with refinement around heating line(s))
-- Transient 3D heat diffusion with moving Gaussian surface heat input + convection (optional radiation)
-- 3D linear thermoelasticity via a C++/pybind11 module (`thermo_bindings`)
-- Optional **inherent strain** surrogate to produce *residual* (permanent) bending
-- Outputs: `.vtk` for ParaView, `.png` plots, `.npy` arrays, `summary.json`, and an auto-generated LaTeX/PDF report
+### Thermal model
 
-## ⚡ Quick Start (Cross-Platform)
+The heat-transfer problem is transient 3D conduction with heat input and surface losses:
 
-**✓ Works on macOS, Windows, and Linux**  
-**✓ All dependencies stay in the project folder**  
-**✓ Nothing installed globally**
+```text
+rho cp(T) dT/dt = div(k(T) grad T) + Q(x,t)
+```
 
-### Automated Setup
+Surface terms include prescribed heat flux, convection, quenching, and optional linearized radiation. The finite-element discretization uses linear 4-node tetrahedral elements. Time integration uses backward Euler:
 
-**macOS / Linux:**
+```text
+(M/dt + K + Kbc) T(n+1) = (M/dt) T(n) + f_heat(n+1) + f_bc(n+1)
+```
+
+Temperature-dependent conductivity and heat capacity are updated with Picard fixed-point iterations inside each time step. The sparse systems are assembled in Python/C++ helpers and solved with SciPy sparse solvers.
+
+### Mechanical model
+
+Mechanical equilibrium is solved after the thermal analysis:
+
+```text
+div(sigma) = 0
+sigma = D(T) : (epsilon - epsilon_th - epsilon_inh)
+epsilon_th = alpha(T) (T - Tref) I
+```
+
+The main validation workflow uses linear thermoelasticity plus a calibrated inherent-strain field to represent permanent line-heating bending. This is an engineering residual-deformation model, not a fully coupled transient elastoplastic forming simulation. An optional J2 elastoplastic path is implemented for exploratory comparisons.
+
+### Mesh and accuracy
+
+The active validation meshes are engineering-resolution unstructured tet4 grids:
+
+- Li2023 plate cases: typically about 8.5k to 9.6k nodes and 30k to 37k tetrahedra.
+- Keel-plate demonstrations: about 8k to 23k nodes and 24k to 88k tetrahedra, depending on mesh settings.
+
+Linear tetrahedra provide nominal second-order spatial behavior for smooth elliptic problems, while backward Euler is first-order accurate in time. In practice, localized moving heat sources, unstructured grids, centroid-based surface flux integration, and the inherent-strain surrogate limit the effective accuracy. A formal mesh/time convergence campaign is planned but is not yet complete for all reported cases.
+
+## Heat-Source Modes
+
+The core solver supports three heat-source idealizations:
+
+- `moving_gaussian`: a localized Gaussian spot moving along a line at torch speed.
+- `line_gaussian`: a full-line Gaussian heat band applied over the active segment.
+- `induction_skin`: a reduced thermal model that distributes absorbed line power through thickness using a prescribed electromagnetic skin-depth expression.
+
+The induction option is a thermal approximation. It does not solve the surrounding coil electromagnetic field.
+
+## Repository Layout
+
+- `thermo_fem/python/run_coupled_3d.py` - main 3D mesh, thermal, mechanics, and output driver.
+- `thermo_fem/cpp/` - C++17 and pybind11 finite-element assembly routines.
+- `scripts/run_anywhere.py` - cross-platform runner that sets up dependencies, builds, runs, and reports.
+- `scripts/run_li2023_cases.py` - Li2023 benchmark runner.
+- `scripts/run_li2023_induction_cases.py` - induction-skin variant for Li2023-style runs.
+- `scripts/plan_line_heating.py` - forward and inverse line-heating planner.
+- `scripts/execute_planned_work_items.py` - calibration, audit, and verification artifact generator.
+- `scripts/make_publication_*.py` - figure-generation utilities for manuscript outputs.
+- `config/` - example and production JSON configurations.
+- `results/` - generated result summaries, comparisons, arrays, and diagnostics.
+- `docs/` - theory notes, setup guides, reports, and workflow references.
+- `publication2/` - active publication manuscript, figures, bibliography, and build files.
+- `publication/` - earlier manuscript package retained for reference.
+
+## Quick Start
+
+### 1. Install prerequisites
+
+Required:
+
+- Python 3.11 or 3.12
+- C++17 compiler
+- CMake
+- Python packages listed in `requirements.txt`
+
+Platform notes:
+
+- macOS: install Xcode Command Line Tools.
+- Linux: install `gcc`, `g++`, and CMake.
+- Windows: install Visual Studio Build Tools and CMake.
+
+Automated setup:
+
 ```bash
 chmod +x setup/setup.sh
 ./setup/setup.sh
 ```
 
-**Windows:**
+On Windows:
+
 ```cmd
 setup\setup.bat
 ```
 
-### Validate Your Setup
+Validate the environment:
 
 ```bash
 python3 scripts/validate_setup.py
 ```
 
-### Run a Simulation
+### 2. Run a configured simulation
+
+Copy an example configuration and run from the repository root:
 
 ```bash
-# 1. Copy example config
 cp config/run_config.example.json run_config.json
-
-# 2. Run simulation
 python3 scripts/run_anywhere.py --config run_config.json
 ```
 
-**📚 Choose your workflow:**
-- **Forward Problem:** Use [config/config_forward_example.json](config/config_forward_example.json) to validate curvature from 900K torch
-- **Inverse Problem:** Use [config/config_inverse_example.json](config/config_inverse_example.json) to optimize heating pattern
+The runner creates a local virtual environment if needed, installs dependencies, builds the C++ extension, runs the solver, and generates report files.
 
-📖 **For detailed workflows, see [docs/reference/QUICK-START-USE-CASES.md](docs/reference/QUICK-START-USE-CASES.md)**
+### 3. Run forward or inverse planning
 
----
-
-## 📦 Standalone executable (no Python install needed)
-
-You can build a native executable on each target OS. The executable still expects the repository to be present (it locates the repo via the current working directory or the `LINEHEATING_REPO` environment variable).
-
-1) Install build dependency:
-
-```bash
-python -m pip install -r requirements-build.txt
-```
-
-2) Build the executable:
-
-```bash
-python scripts/build_executable.py --onefile --name lineheating
-```
-
-3) Run it from the repo root:
-
-```bash
-./dist/lineheating --config run_config.json
-```
-
-Files:
-- Build script: [scripts/build_executable.py](scripts/build_executable.py)
-- Build requirements: [requirements-build.txt](requirements-build.txt)
-
-## 📚 Documentation
-
-### Getting Started
-- **[docs/reference/QUICK-START-USE-CASES.md](docs/reference/QUICK-START-USE-CASES.md)** - Step-by-step guide for both use cases
-- **[docs/reference/USE-CASES.md](docs/reference/USE-CASES.md)** - Detailed theory and examples
-
-### Setup & Installation
-- **[docs/guides/SETUP.md](docs/guides/SETUP.md)** - Installation and setup guide
-- **[docs/guides/OFFLINE-SETUP.md](docs/guides/OFFLINE-SETUP.md)** - Air-gapped/offline installation
-- **[docs/guides/QUICK-REFERENCE.md](docs/guides/QUICK-REFERENCE.md)** - Command reference
-
-### Troubleshooting
-- **[docs/guides/WINDOWS-VS-TROUBLESHOOTING.md](docs/guides/WINDOWS-VS-TROUBLESHOOTING.md)** - Windows compiler issues (detailed)
-- **[docs/guides/WINDOWS-QUICK-FIX.md](docs/guides/WINDOWS-QUICK-FIX.md)** - Windows quick solutions
-
----
-
-## Quick start (Windows / Linux / macOS)
-
-### 1) Prerequisites
-
-Required:
-- **Python 3.11 or 3.12** (recommended: 3.11)
-- A C++ compiler (C++17)
-  - **Windows:** Visual Studio Build Tools ([troubleshooting guide](WINDOWS-VS-TROUBLESHOOTING.md))
-  - **Linux:** `gcc/g++`
-  - **macOS:** Xcode Command Line Tools
-- CMake (the runner can also use the Python `cmake` package)
-
-Recommended:
-- Keep all generated outputs under the repo-level `results/` folder (so code folders stay clean)
-
-Gmsh:
-- The solver uses the **Python `gmsh` bindings** (installed via `requirements.txt`).
-- A system `gmsh` executable is optional; if not found, the runner prints install hints.
-
-Optional (for PDF report):
-- `latexmk` or `pdflatex` on your `PATH` (TeX Live / MiKTeX)
-  - If TeX is not installed, the report generator still writes `report.tex`.
-
-### 2) Create a config file
-
-Copy and edit the example JSON:
-
-```bash
-cp run_config.example.json run_config.json
-```
-
-Edit `run_config.json`:
-- `out`: output folder (recommended: a folder under `results/`)
-- `simulation`: parameters passed through to `thermo_fem/python/run_coupled_3d.py`
-- `runner`: runner behavior (build/report toggles)
-
-If you omit `out`, the runner defaults to `results/<config_name>`.
-
-### 3) Run (build + simulate + report)
-
-From the repo root:
-
-```bash
-python scripts/run_anywhere.py --config run_config.json
-```
-
-## Forward + Inverse Planning (line-heating plans)
-
-Use the planner CLI in [scripts/plan_line_heating.py](scripts/plan_line_heating.py) with a JSON config.
-
-**Forward (plan → curvature):**
-
-- Example config: [config/plan_forward_example.json](config/plan_forward_example.json)
-
-**Inverse (curvature → plan):**
-
-- Example config: [config/plan_example.json](config/plan_example.json)
-
-Run either mode:
+Forward plan evaluation:
 
 ```bash
 python3 scripts/plan_line_heating.py --config config/plan_forward_example.json
+```
+
+Inverse planning:
+
+```bash
 python3 scripts/plan_line_heating.py --config config/plan_example.json
 ```
 
-Outputs are written to your configured `out` folder. For safety, if `out` points inside a code folder like `thermo_fem/` or `python_prototype/`, the runner automatically redirects it to `results/<folder_name>`.
+Outputs are written to the configured `out` folder, normally under `results/`.
 
-To force writing into a code folder (not recommended), pass:
+## Common Simulation Parameters
 
-```bash
-python scripts/run_anywhere.py --allow-code-out --config run_config.json
-```
+Most solver options can be supplied under the `simulation` section of a JSON config.
 
-## Clean generated files
+- Geometry and mesh: `Lx`, `Ly`, `thickness`, `h`, `h_refine`, `refine_band`
+- Heating lines: `heat_y`, `heat_y_list`, or arbitrary `heat_lines`
+- Process parameters: `E`, `velocity`, `r0`, `passes`, `heat_mode`, `pass_gap`
+- Thermal controls: `dt`, `extra_time`, `target_Tmax`, `target_Tmax_iters`
+- Boundary conditions: `h_conv`, `h_conv_top`, `h_conv_bottom`, radiation emissivity
+- Quenching: `quench`, `quench_start`, `quench_h_conv`, `quench_T_inf`
+- Residual bending: `use_inherent`, `eps0`, `inh_sigma`, `inh_zfrac`
+- Output controls: `vtk_deform_scale`, `energy_balance`, output directory
 
-Dry-run (prints what would be deleted):
+## Outputs
 
-```
-python3 scripts/clean_generated.py
-```
+Each run writes a structured output folder. Typical files include:
 
-Actually delete generated virtualenvs + outputs:
+- `summary.json` - key inputs, mesh size, thermal peak, deflection, camber, and curvature metrics.
+- `solution_manifest.json` - paths to important generated artifacts.
+- `run.log` - console log for the simulation.
+- `nodes.npy`, `tet.npy`, `temperature.npy`, `displacement.npy` - numerical arrays.
+- `results_*.vtk` - ParaView visualization files.
+- `*.png` - mesh, temperature, deflection, camber, and validation plots.
+- `report.tex` and optionally `report.pdf` - generated run report.
 
-```
-python3 scripts/clean_generated.py --apply
-```
+## Validation and Publication Artifacts
 
-Optional extras:
+The repository includes scripts and generated artifacts for a publishable validation workflow:
 
-```
-python3 scripts/clean_generated.py --apply --include-build --include-caches --include-latex-aux
-```
+- Li2023 benchmark validation tables and plots.
+- Velocity-dependent inherent-strain calibration artifacts.
+- Keel-plate thermal unit audits.
+- Energy-response verification scaffolds.
+- Process comparisons between moving Gaussian, line Gaussian, and induction-skin sources.
+- Journal-style figures in `publication2/figures/`.
+- A complete LaTeX manuscript in `publication2/main.tex`.
 
-What this does:
-- Creates a local venv at `./.venv_lineheating`
-- Installs Python deps from `requirements.txt`
-- Builds `thermo_fem/build/cpp/thermo_bindings.*` via CMake
-- Runs `thermo_fem/python/run_coupled_3d.py`
-- Generates `report.tex` and (if TeX is installed) `report.pdf`
-
-## Project layout (what file does what)
-
-Runner / utilities:
-- [scripts/run_anywhere.py](scripts/run_anywhere.py): creates venv, installs deps, builds C++ extension, runs simulation, generates report, writes `solution_manifest.json`.
-- [scripts/clean_generated.py](scripts/clean_generated.py): deletes generated venvs + outputs (dry-run by default).
-
-Simulation core:
-- [thermo_fem/python/run_coupled_3d.py](thermo_fem/python/run_coupled_3d.py): main 3D workflow (mesh → thermal solve → mechanics solve → outputs).
-
-Report generation:
-- [scripts/report/make_report.py](scripts/report/make_report.py): reads an output folder (`summary.json` + plots) and writes `report.tex` (and `report.pdf` if TeX exists).
-
-C++ extension (thermoelasticity / assembly):
-- [thermo_fem/cpp/CMakeLists.txt](thermo_fem/cpp/CMakeLists.txt): builds the `thermo_bindings` pybind11 module.
-- [thermo_fem/cpp/src/heat.cpp](thermo_fem/cpp/src/heat.cpp): thermal element assembly helpers.
-- [thermo_fem/cpp/src/mechanics.cpp](thermo_fem/cpp/src/mechanics.cpp): 3D linear elasticity + thermal load assembly.
-- [thermo_fem/cpp/src/bindings.cpp](thermo_fem/cpp/src/bindings.cpp): pybind11 bindings.
-
-## Mathematical model (what is being solved)
-
-Thermal (transient heat diffusion in 3D):
-
-$$\rho c_p\,\frac{\partial T}{\partial t}=\nabla\cdot\left(k\nabla T\right)\quad\text{in }\Omega$$
-
-Top surface heat input is a moving Gaussian flux (line-heating scan along $x$):
-
-$$-k\nabla T\cdot\mathbf{n}=q(x,y,t) - h\,(T-T_\infty)\quad\text{on }\Gamma_{top}$$
-$$q(x,y,t)=q_0\,\exp\left(-\frac{2r^2}{r_0^2}\right),\quad r^2=(x-x_s(t))^2+(y-y_\text{line})^2$$
-
-Bottom (and optionally other faces) use convection:
-
-$$-k\nabla T\cdot\mathbf{n} = -h\,(T-T_\infty)\quad\text{on }\Gamma_{conv}$$
-
-Time integration uses backward Euler, giving a sparse linear solve each timestep:
-
-$$\left(\frac{M}{\Delta t}+K_T\right)\,T^{n+1}=\frac{M}{\Delta t}\,T^{n}+f^{n+1}$$
-
-where $M$ is the (capacity) mass matrix and $K_T$ is the conduction/Robin stiffness.
-
-Mechanics (3D linear thermoelasticity):
-
-$$\nabla\cdot\sigma + b = 0,\quad \sigma=\mathbb{C}:(\varepsilon-\varepsilon_{th}-\varepsilon_{inh})$$
-$$\varepsilon=\tfrac{1}{2}(\nabla u+(\nabla u)^T),\quad \varepsilon_{th}=\alpha\,(T-T_{ref})\,\mathbf{I}$$
-
-The inherent-strain term $\varepsilon_{inh}$ is an optional surrogate for inelastic/plastic effects to produce residual bending after cooldown.
-
-### 4) Outputs
-
-Everything is written under the configured `out` folder, including:
-- `summary.json` (key inputs + thermal peak + deflection/camber metrics)
-- `run.log` (full console log)
-- `solution_manifest.json` (paths to key outputs)
-- `report.tex`, `report.pdf`
-- `results_*.vtk` (ParaView)
-- `*.png` plots
-- `nodes.npy`, `tet.npy`, `temperature.npy`, `displacement.npy`
-
----
-
-## 📚 Documentation
-
-- **[docs/guides/SETUP.md](docs/guides/SETUP.md)** - Detailed setup instructions for each platform
-- **[docs/guides/PLATFORM-INDEPENDENT.md](docs/guides/PLATFORM-INDEPENDENT.md)** - How cross-platform support works
-- **[docs/guides/QUICK-REFERENCE.md](docs/guides/QUICK-REFERENCE.md)** - Command cheat sheet for all platforms
-- **[README.md](README.md)** - This file (project overview)
-
----
-
-## Report-only mode
-
-If you already have a completed output folder (with `summary.json` and plots), you can generate the report only:
+Build the active manuscript:
 
 ```bash
-python scripts/run_anywhere.py --out results/some_run --report-only
+cd publication2
+make
 ```
 
-## Simulation parameters (high level)
+or manually:
 
-You can set any CLI parameter from `thermo_fem/python/run_coupled_3d.py` in JSON under `simulation`.
+```bash
+cd publication2
+pdflatex main.tex
+bibtex main
+pdflatex main.tex
+pdflatex main.tex
+```
 
-A few common ones:
-- Geometry/mesh: `Lx`, `Ly`, `thickness`, `h`, `h_refine`, `refine_band`
-- Heating lines:
-  - Single: `heat_y`
-  - Multiple: `heat_y_list: [250, 500, 750]`
-  - Arbitrary orientation: `heat_lines` with segments like `{x0,y0,x1,y1}`
-- Multi-pass scheduling:
-  - `heat_mode: "simultaneous" | "sequential"`
-  - `pass_gap` (seconds between sequential passes)
-- Target peak temperature: `target_Tmax`, `target_Tmax_tol`, `target_Tmax_iters`
-- Quench: `quench`, `quench_start`, `quench_h_conv`, `quench_T_inf`
-- Residual bending (surrogate): `use_inherent`, `eps0`, `inh_sigma`, `inh_zfrac`
-- VTK deformation: `vtk_deform_scale` (use `1` for true scale)
+## Standalone Executable
 
-## Manual build (advanced)
+You can package the runner as a native executable for a target OS. The executable still expects the repository data and scripts to be present.
 
-You can also build the C++ extension manually:
+```bash
+python -m pip install -r requirements-build.txt
+python scripts/build_executable.py --onefile --name lineheating
+./dist/lineheating --config run_config.json
+```
+
+## Manual Build
+
+To build the C++ extension directly:
 
 ```bash
 cd thermo_fem
@@ -310,20 +227,62 @@ cmake -S cpp -B build/cpp -DPYBIND11_FINDPYTHON=ON
 cmake --build build/cpp -j
 ```
 
-Then run the solver:
+Then run the Python driver:
 
 ```bash
-cd thermo_fem/python
-python run_coupled_3d.py --out outputs_3d
+cd python
+python run_coupled_3d.py --out ../../results/manual_run
 ```
 
-## Troubleshooting
+## Cleaning Generated Files
 
-- **No PDF produced**: install `latexmk` or `pdflatex` (TeX Live / MiKTeX). You should still get `report.tex`.
-- **Build fails on Windows**: install Visual Studio Build Tools + CMake, then rerun `python scripts/run_anywhere.py --config run_config.json`.
-- **ParaView looks “too deformed”**: set `vtk_deform_scale: 1` for true scale; use `results_camber_only_deformed.vtk` for thickness-preserving camber visualization.
+Preview cleanup:
 
-## Notes
+```bash
+python3 scripts/clean_generated.py
+```
 
-- Units are consistent in **mm, s, K, MPa**.
-- Residual bending requires inelastic effects; in this repo it’s approximated via the inherent-strain surrogate.
+Apply cleanup:
+
+```bash
+python3 scripts/clean_generated.py --apply
+```
+
+Include build and cache artifacts:
+
+```bash
+python3 scripts/clean_generated.py --apply --include-build --include-caches --include-latex-aux
+```
+
+## Documentation
+
+- `docs/reference/QUICK-START-USE-CASES.md` - step-by-step usage examples.
+- `docs/reference/USE-CASES.md` - forward and inverse problem descriptions.
+- `docs/guides/SETUP.md` - installation details.
+- `docs/guides/OFFLINE-SETUP.md` - air-gapped setup.
+- `docs/guides/QUICK-REFERENCE.md` - command reference.
+- `docs/guides/WINDOWS-VS-TROUBLESHOOTING.md` - Windows compiler troubleshooting.
+- `publication2/README.md` - manuscript package instructions.
+
+## Current Limitations
+
+- The main validation workflow uses an inherent-strain surrogate for residual bending rather than fully coupled transient elastoplastic forming.
+- The induction-skin option is a reduced thermal deposition model, not a complete electromagnetic field solver.
+- Wall-clock runtimes are not consistently logged in all archived summaries.
+- A systematic mesh/time convergence study is still needed for full publication-grade numerical verification.
+- The active manuscript bibliography should be completed with the final Li et al. (2023) citation details before submission.
+
+## Units
+
+The project uses a consistent engineering unit system:
+
+- length: mm
+- time: s
+- temperature: K or degrees C where explicitly noted
+- stress/modulus: MPa
+- force: N
+- energy: J
+
+## License and Citation
+
+No license file is currently included. Add a project license before public distribution. For academic use, cite the manuscript and the Li et al. (2023) benchmark source once the bibliography details are finalized.
